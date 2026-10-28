@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ysfconsole"
+version = "0.1.0"
+description = "Monitor the connections on a YSF reflector"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "BSD-3-Clause"
+authors = [
+  { name = "Fred C" },
+]
+keywords = ["flask", "websocket"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Framework :: Flask",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: System :: Logging",
+]
+
+dependencies = [
+  "Flask>=3.0",
+  "flask-sock>=0.7",
+]
+
+[project.optional-dependencies]
+dev = [
+  "build",
+  "pre-commit",
+  "flake8",
+  "isort",
+  "pylint",
+  "ipython",
+  "ipdb",
+]
+
+[project.scripts]
+ysfrun = "ysfconsole.run:main"
+
+[project.urls]
+Homepage = "https://github.com/0x9900/ysfconsole"
+Issues   = "https://github.com/0x9900/ysfconsole/issues"
+
+[tool.setuptools.packages.find]
+include = ["ysfconsole*"]

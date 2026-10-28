@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ reflecror_name }} YSF Reflector</title>
+  <link rel="stylesheet" href="/static/ysfconsole.css">
+</head>
+<body>
+  <header>
+    <h1>Live Reflector — <code>{{ reflector_name }}</code></h1>
+    <span id="status" class="off">disconnected</span>
+  </header>
+  <main>
+    <div id="connected"></div>
+    <div id="meta"></div>
+  </main>
+  <footer>
+    © 2027 Fred (W6BSD) <a href="https://tools.bsdworld.org/">https://tools.bsdworld.org/</a>
+  </footer>
+
+  <script>
+    const connectedEl    = document.getElementById('connected');
+    const statusEl = document.getElementById('status');
+    const metaEl   = document.getElementById('meta');
+
+    let ws = null;
+    let reconnectTimer = null;
+
+    function renderPayload(payload) {
+      connectedEl.innerHTML = '';                 // wipe previous payload
+
+      const header = document.createElement('div');
+      header.className = 'marker';
+      header.textContent = payload.marker
+      connectedEl.appendChild(header);
+
+      const cols = [];
+      const seen = new Set();
+      for (const obj of payload.lines) {
+        if (!obj || obj._parse_error) continue;
+        for (const k of Object.keys(obj)) {
+          if (!seen.has(k)) { seen.add(k); cols.push(k); }
+        }
+      }
+
+      // --- build the table ---
+      const table = document.createElement('table');
+      table.className = 'payload-table';
+
+      // thead
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      for (const c of cols) {
+        const th = document.createElement('th');
+        th.textContent = c.toUpperCase();
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+      table.appendChild(thead);
+
+      // tbody
+      const tbody = document.createElement('tbody');
+      for (const obj of payload.lines) {
+        const tr = document.createElement('tr');
+
+        if (obj && obj._parse_error) {
+          // malformed line — span all columns
+          tr.className = 'bad';
+          const td = document.createElement('td');
+          td.colSpan = Math.max(cols.length, 1);
+          td.textContent = '⚠ unparseable: ' + obj._raw;
+          tr.appendChild(td);
+        } else {
+          for (const c of cols) {
+            const td = document.createElement('td');
+            const v = obj ? obj[c] : undefined;
+            td.textContent = (v === undefined || v === null) ? '' : String(v);
+            tr.appendChild(td);
+          }
+        }
+        tbody.appendChild(tr);
+      }
+      table.appendChild(tbody);
+      connectedEl.appendChild(table);
+
+      // --- meta line (unchanged) ---
+      metaEl.textContent =
+        `${payload.lines.length} Reflector(s) connected — Updated: ${new Date().toLocaleTimeString()}`;
+      connectedEl.scrollTop = 0;
+    }
+
+    function connect() {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      ws = new WebSocket(`${proto}://${location.host}/ws/connections`);
+
+      ws.onopen = () => {
+        statusEl.textContent = 'connected';
+        statusEl.className = 'on';
+      };
+
+      ws.onmessage = (ev) => {
+        if (!ev.data) return;
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch { return; }
+        if (msg.type === 'payload') renderPayload(msg);
+      };
+
+      ws.onclose = () => {
+        statusEl.textContent = 'disconnected';
+        statusEl.className = 'off';
+        ws = null;
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(connect, 2000);
+      };
+
+      ws.onerror = () => { try { ws.close(); } catch (_) {} };
+    }
+
+    connect();
+  </script>
+</body>
+</html>

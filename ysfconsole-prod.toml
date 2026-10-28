@@ -1,0 +1,7 @@
+log_path          = "logs"
+log_prefix        = "ysfreflector*.log"
+log_marker        = "Currently linked repeaters/gateways"
+reflector_name    = "US-BayArea-YSF"
+poll_interval     = 0.5
+idle_flush        = 3.0
+max_payload_lines = 10000
