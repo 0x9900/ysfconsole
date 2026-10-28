@@ -21,8 +21,6 @@ from flask_sock import Sock
 
 from .config import Config
 
-app = Flask(__name__)
-sock = Sock(app)
 
 RE_GW = re.compile(
   r'^\s*(?P<call>\w+)\s*:\s*(?P<ip>.+):(?P<port>\d+)\s+(\d+/\d+)\s*$'
@@ -250,6 +248,8 @@ class PayloadHub:
 def create_app() -> Flask:
   app = Flask(__name__)
   sock = Sock(app)
+  app.config['SOCK_SERVER_OPTIONS'] = {'ping_interval': 25}
+  sock.init_app(app)
 
   hub = PayloadHub(Config.log_path, Config.log_prefix, Config.poll_interval, Config.idle_flush)
   app.extensions["payload_hub"] = hub

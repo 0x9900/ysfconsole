@@ -1,0 +1,31 @@
+[Unit]
+Description=YSF Reflector Console
+After=network.target
+
+[Service]
+Type=notify
+User=fred
+Group=staff
+WorkingDirectory=/opt/ysfconsole
+
+ExecStart=/opt/ysfconsole/venv/bin/gunicorn ysfconsole.wsgi:app \
+   --bind 127.0.0.1:8010 \
+   --workers 1 \
+   --threads 100 \
+   --access-logfile /var/log/ysfconsole/access.log \
+   --error-logfile /var/log/ysfconsole/error.log
+
+Environment="PATH=/opt/ysfconsole/venv/bin"
+Environment="VIRTUAL_ENV=/opt/ysfconsole/venv"
+
+Restart=always
+RestartSec=5
+TimeoutStartSec=30
+TimeoutStopSec=30
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target
