@@ -22,6 +22,7 @@ from flask_sock import Sock
 from .config import Config
 
 
+TS_LEN = 27                                   # width of the timestamp prefix
 RE_GW = re.compile(
   r'^\s*(?P<call>\w+)\s*:\s*(?P<ip>.+):(?P<port>\d+)\s+(\d+/\d+)\s*$'
 )
@@ -35,35 +36,21 @@ def is_marker(line: str) -> bool:
   return bool(Config.log_marker.search(line))
 
 
+def _line_body(raw: bytes) -> str:
+  return raw.decode("utf-8", errors="replace").rstrip("\r\n")[TS_LEN:]
+
+
 def find_last_marker(f) -> int:
-  """Return the byte offset of the start of the *last* marker line."""
+  """Offset of the last marker line, or EOF if none. `f` must be binary."""
   f.seek(0)
   last = None
   while True:
     pos = f.tell()
-    line = f.readline()
-    if not line:
-      return pos if last is None else last   # EOF if no marker
-    if is_marker(line.rstrip("\r\n")[27:]):
-      last = pos
-
-
-def _line_body(line: str) -> str:
-  return line.rstrip("\r\n")[27:]          # strip the timestamp prefix
-
-
-def find_last_marker(f) -> int:
-  """Offset of the last marker line, or EOF if none."""
-  f.seek(0)
-  last = None
-  while True:
-    pos = f.tell()
-    line = f.readline()
-    if not line:
+    raw = f.readline()
+    if not raw:
       return pos if last is None else last
-    if is_marker(_line_body(line)):
+    if is_marker(_line_body(raw)):
       last = pos
-
 
 # --- Broadcast hub -----------------------------------------------------------
 class PayloadHub:
@@ -112,18 +99,18 @@ class PayloadHub:
       self.clients.discard(client_queue)
 
   def _emit(self, payload):
-    """Broadcast a completed payload to all clients."""
     msg = json.dumps(payload)
     with self.lock:
       self.last_payload = payload
-      dead = []
-      for q in self.clients:
+      for q in list(self.clients):
         try:
           q.put_nowait(msg)
-        except Exception:
-          dead.append(q)
-      for q in dead:
-        self.clients.discard(q)
+        except queue.Full:
+          try:
+            q.get_nowait()          # discard oldest
+            q.put_nowait(msg)
+          except (queue.Empty, queue.Full):
+            self.clients.discard(q)
 
   def _flush_current(self):
     """If we have a buffered payload, emit it and clear the buffer."""
@@ -169,10 +156,53 @@ class PayloadHub:
 
   def _open(self, name, from_start=False):
     log.info('open %s', name)
-    f = open(name, "r", encoding="utf-8", errors="replace")
+    f = open(name, "rb")
     if not from_start:
       f.seek(find_last_marker(f))
     return f
+
+  def _handle_line(self, raw: bytes):
+    body = _line_body(raw)
+    if not body:
+      return                                   # genuine blank line
+    now = time.monotonic()
+    if is_marker(body):
+      self._flush_current()
+      self.current_marker = body
+      self.last_line_at = now
+    elif self.current_marker is not None:
+      self._append_line(body)
+      self.last_line_at = now
+
+  def _check_rotation(self, f):
+    """
+    Called at EOF. Returns `f` if it is still the right file, otherwise a
+    replacement file object, or None to force a fresh open.
+    """
+    try:
+      st_path = os.stat(f.name)
+    except FileNotFoundError:                  # deleted or renamed away
+      self._flush_current()
+      f.close()
+      return None
+
+    newest = self._newest_log()
+    replaced = st_path.st_ino != os.fstat(f.fileno()).st_ino
+    if replaced or (newest and newest != f.name):
+      # At EOF, so the old file is fully drained. Switch to the new one.
+      self._flush_current()
+      f.close()
+      return self._open(newest or f.name, from_start=True)
+
+    if st_path.st_size < f.tell():             # truncated in place
+      self._reset_buffer()
+      f.seek(find_last_marker(f))
+    return f
+
+  def _maybe_idle_flush(self):
+    if (self.current_marker is not None
+        and time.monotonic() - self.last_line_at >= self.idle_flush):
+      self._flush_current()
 
   def _reset_buffer(self):
     self.current_marker = None
@@ -180,66 +210,45 @@ class PayloadHub:
 
   def _tail_loop(self):
     f = None
-    name = None
-    pending = ""
+    pending = b""
     try:
       while not self._stop.is_set():
-        # (Re)open: newest matching file, resuming at its last marker.
-        if f is None:
-          name = self._newest_log()
-          log.info('Logfile: %s', name)
-          if name is None:
-            self._stop.wait(self.poll_interval)
-            continue
-          f = self._open(name)
-          pending = ""
-
-        chunk = f.readline()
-        if chunk:
-          pending += chunk
-          if not pending.endswith("\n"):
-            continue                       # partial line, wait for the rest
-          line, pending = pending, ""
-          body = _line_body(line)
-          if not body:
-            continue                       # genuine blank line, not EOF
-          if is_marker(body):
-            self._flush_current()
-            self.current_marker = body
-            self.last_line_at = time.monotonic()
-          elif self.current_marker is not None:
-            self._append_line(body)
-            self.last_line_at = time.monotonic()
-          continue
-
-        # ---- EOF: rotation / truncation / idle flush ----
         try:
-          newest = self._newest_log()
-          if newest and newest != name:
-            # We're at EOF, so the old file is fully drained. Switch.
-            self._flush_current()
+          # (Re)open the newest matching file, resuming at its last marker.
+          if f is None:
+            name = self._newest_log()
+            if name is None:
+              self._stop.wait(self.poll_interval)
+              continue
+            f = self._open(name)
+            pending = b""
+
+          raw = f.readline()
+          if raw:
+            pending += raw
+            if pending.endswith(b"\n"):        # only handle complete lines
+              self._handle_line(pending)
+              pending = b""
+            continue
+
+          # ---- EOF: rotation / truncation / idle flush ----
+          new_f = self._check_rotation(f)
+          if new_f is not f:
+            f = new_f
+            pending = b""
+            continue
+
+          self._maybe_idle_flush()
+          self._stop.wait(self.poll_interval)
+
+        except Exception:
+          log.exception('tail loop error; retrying')
+          if f is not None:
             f.close()
-            name = newest
-            f = self._open(name, from_start=True)
-            pending = ""
-            continue
-          if os.stat(name).st_size < f.tell():     # truncated in place
-            f.seek(find_last_marker(f))
-            self._reset_buffer()
-            pending = ""
-            continue
-        except FileNotFoundError:
-          f.close()
-          f = None
+            f = None
+          pending = b""
           self._reset_buffer()
-          continue
-
-        now = time.monotonic()
-        if (self.current_marker is not None
-            and (now - self.last_line_at) >= self.idle_flush):
-          self._flush_current()
-
-        self._stop.wait(self.poll_interval)
+          self._stop.wait(self.poll_interval)
     finally:
       if f is not None:
         f.close()
@@ -248,7 +257,6 @@ class PayloadHub:
 def create_app() -> Flask:
   app = Flask(__name__)
   sock = Sock(app)
-  app.config['SOCK_SERVER_OPTIONS'] = {'ping_interval': 25}
   sock.init_app(app)
 
   hub = PayloadHub(Config.log_path, Config.log_prefix, Config.poll_interval, Config.idle_flush)
@@ -268,7 +276,7 @@ def create_app() -> Flask:
     try:
       while True:
         try:
-          msg = q.get(timeout=1.0)
+          msg = q.get(timeout=5.0)
         except queue.Empty:
           ws.send("")     # keep-alive / detect dead clients
           continue
