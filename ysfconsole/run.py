@@ -7,8 +7,9 @@
 
 import argparse
 
-from .config import Config
 from ysfconsole import create_app
+
+from .config import Config
 
 
 def parse_bind(bind):

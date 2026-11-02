@@ -5,8 +5,9 @@
 #
 # Distributed under terms of the BSD 3-Clause license.
 
-from .config import Config
 from ysfconsole import create_app
+
+from .config import Config
 
 Config.load_config('ysfconsole-prod.toml')
 app = create_app()

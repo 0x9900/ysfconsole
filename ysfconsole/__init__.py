@@ -24,7 +24,6 @@ from flask_sock import Sock
 
 from .config import Config
 
-
 TS_LEN = 27                                   # width of the timestamp prefix
 RE_GW = re.compile(
   r'^\s*(?P<call>\w+)\s*:\s*(?P<ip>.+):(?P<port>\d+)\s+(\d+/\d+)\s*$'
@@ -91,15 +90,13 @@ class PayloadHub:
   New clients are sent the latest message of each type on registration.
   """
 
-  def __init__(
-    self,
-    log_dir: str | Path,
-    pattern: str,
-    poll_interval: float,
-    idle_flush: float,
-    marker: re.Pattern[str],
-    max_payload_lines: int,
-  ) -> None:
+  # pylint: disable=too-many-instance-attributes, too-many-arguments, too-many-positional-arguments
+  def __init__(self, log_dir: str | Path,
+               pattern: str,
+               poll_interval: float,
+               idle_flush: float,
+               marker: re.Pattern[str],
+               max_payload_lines: int) -> None:
     self.log_dir = Path(log_dir)
     self.pattern = pattern        # e.g. "ysfreflector*.log"
     self.poll_interval = poll_interval
@@ -193,6 +190,7 @@ class PayloadHub:
     return max(files, key=mtime, default=None)
 
   def _open(self, name: str, from_start: bool = False) -> BinaryIO:
+    # pylint: disable=consider-using-with
     log.info('open %s', name)
     f = open(name, "rb")
     try:
@@ -284,7 +282,7 @@ class PayloadHub:
           self._maybe_idle_flush()
           self._stop.wait(self.poll_interval)
 
-        except Exception:
+        except Exception:    # pylint: disable=broad-exception-caught
           log.exception('tail loop error; retrying')
           if f is not None:
             f.close()
@@ -333,9 +331,9 @@ def create_app() -> Flask:
         try:
           msg = q.get(timeout=5.0)
         except queue.Empty:
-          msg = ""                # keep-alive / detect dead clients
+          msg = ""      # keep-alive / detect dead clients
         ws.send(msg)
-    except Exception:
+    except Exception:   # pylint: disable=broad-exception-caught
       log.debug("websocket closed", exc_info=True)
     finally:
       hub.unregister(q)

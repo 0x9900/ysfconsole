@@ -4,12 +4,19 @@
 # Copyright (C) 2026 fred <github-fred@hidzz.com>
 #
 # Distributed under terms of the BSD 3-Clause license.
+#
+# pylint: disable=too-many-instance-attributes
 
+import logging
 import os
 import re
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
+
+log = logging.getLogger(__name__)
+log.setLevel(logging.INFO)
+
 
 @dataclass
 class Config:
@@ -45,7 +52,7 @@ class Config:
 
     for key, value in _config_data.items():
       if not hasattr(cls, key.lower()):
-        current_app.logger.warning('Key %s not a value configuration attribute', key)
+        log.warning('Key %s not a value configuration attribute', key)
         continue
 
       if key == 'log_marker':

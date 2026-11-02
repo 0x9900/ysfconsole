@@ -5,7 +5,7 @@
  * Distributed under terms of the BSD 3-Clause license.
  */
 
-body { 
+body {
   font-family: system-ui, sans-serif;
   margin: 0;
   background: #111;
@@ -56,7 +56,7 @@ footer a:hover {
   background: #444;
 }
 
-#status.on  { 
+#status.on  {
   background: #1f7a3a;
 }
 
@@ -95,7 +95,7 @@ footer a:hover {
 
 .callsign,
 .destination,
-.gateway, 
+.gateway,
 .timer {
   display: flex;
   flex-direction: column;
