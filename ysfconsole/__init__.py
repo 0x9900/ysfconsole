@@ -21,10 +21,21 @@ from flask_sock import Sock
 
 from .config import Config
 
+from pprint import pprint
+
 
 TS_LEN = 27                                   # width of the timestamp prefix
 RE_GW = re.compile(
   r'^\s*(?P<call>\w+)\s*:\s*(?P<ip>.+):(?P<port>\d+)\s+(\d+/\d+)\s*$'
+)
+RE_TX = re.compile(
+  r'^Received data from (?P<call>\w+)\s+to\s(?P<dest>\w+)\s+at\s(?P<gw>\w+)'
+)
+RE_RX = re.compile(
+  r'^Received end of transmission'
+)
+RE_WD = re.compile(
+  r'^Network watchdog has expired'
 )
 
 logging.basicConfig()
@@ -79,6 +90,8 @@ class PayloadHub:
     # The payload currently being assembled (None if we haven't seen a marker yet).
     self.current_marker = None
     self.current_lines = []
+    self.current_tx = None
+    self.activity = []
     self.last_line_at = 0.0     # monotonic timestamp of last received line
 
     # The most recently completed payload, replayed to new clients.
@@ -112,17 +125,24 @@ class PayloadHub:
           except (queue.Empty, queue.Full):
             self.clients.discard(q)
 
-  def _flush_current(self):
+  def _flush_connected(self):
     """If we have a buffered payload, emit it and clear the buffer."""
-    if self.current_marker is None:
-      return
     payload = {
-      "type": "payload",
+      "type": "connected",
       "marker": self.current_marker,
       "lines": list(self.current_lines),
     }
+    pprint(payload)
     self.current_marker = None
     self.current_lines = []
+    self._emit(payload)
+
+  def _flush_tx(self):
+    payload = {
+      "type": "tx",
+      "tx": self.current_tx,
+    }
+    pprint(payload)
     self._emit(payload)
 
   def start(self):
@@ -139,17 +159,19 @@ class PayloadHub:
       self._thread.join(timeout=2)
 
   def _append_line(self, line: str):
-    if len(self.current_lines) > Config.max_payload_lines:
-      return
-    # parse connected GW
-    if match := RE_GW.match(line):
-      self.current_lines.append(match.groupdict())
+    if match := RE_TX.match(line):
+      self.current_tx = match.groupdict()
+    elif RE_RX.match(line):
+      self.current_tx = None
+    elif len(self.current_lines) < Config.max_payload_lines:
+      if match := RE_GW.match(line):
+        self.current_lines.append(match.groupdict())
 
   def _newest_log(self) -> str | None:
     def mtime(p):
       try:
         return os.stat(p).st_mtime
-      except OSError:              # vanished between glob and stat
+      except OSError:
         return -1
     files = glob.glob(str(self.log_dir / self.pattern))
     return max(files, key=mtime, default=None)
@@ -161,18 +183,27 @@ class PayloadHub:
       f.seek(find_last_marker(f))
     return f
 
+
   def _handle_line(self, raw: bytes):
     body = _line_body(raw)
     if not body:
-      return                                   # genuine blank line
-    now = time.monotonic()
-    if is_marker(body):
-      self._flush_current()
+        return
+
+    log.debug("raw=%r body=%r marker=%s cur=%r",
+              raw, body, is_marker(body) if body else None, self.current_marker)
+
+    self.last_line_at = time.monotonic()
+    if RE_RX.match(body) or RE_WD.match(body):
+      self.current_tx = None
+      self._flush_tx()
+    elif RE_TX.match(body):
+      self._append_line(body)
+      self._flush_tx()
+    elif is_marker(body):
       self.current_marker = body
-      self.last_line_at = now
     elif self.current_marker is not None:
       self._append_line(body)
-      self.last_line_at = now
+
 
   def _check_rotation(self, f):
     """
@@ -182,7 +213,7 @@ class PayloadHub:
     try:
       st_path = os.stat(f.name)
     except FileNotFoundError:                  # deleted or renamed away
-      self._flush_current()
+      self._flush_connected()
       f.close()
       return None
 
@@ -190,7 +221,7 @@ class PayloadHub:
     replaced = st_path.st_ino != os.fstat(f.fileno()).st_ino
     if replaced or (newest and newest != f.name):
       # At EOF, so the old file is fully drained. Switch to the new one.
-      self._flush_current()
+      self._flush_connected()
       f.close()
       return self._open(newest or f.name, from_start=True)
 
@@ -202,9 +233,10 @@ class PayloadHub:
   def _maybe_idle_flush(self):
     if (self.current_marker is not None
         and time.monotonic() - self.last_line_at >= self.idle_flush):
-      self._flush_current()
+      self._flush_connected()
 
   def _reset_buffer(self):
+    return
     self.current_marker = None
     self.current_lines = []
 

@@ -3,6 +3,11 @@
 <head>
   <meta charset="utf-8">
   <title>{{ reflecror_name }} YSF Reflector</title>
+
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Kode+Mono:wght@400..700&display=swap" rel="stylesheet">
+
   <link rel="stylesheet" href="/static/ysfconsole.css">
 </head>
 <body>
@@ -11,7 +16,19 @@
     <span id="status" class="off">disconnected</span>
   </header>
   <main>
-    <div id="connected"></div>
+    <div class="marker">Transmitting:</div>
+    <div class="tx">
+      <div class="callsign" id="callsign"></div>
+      <div class="destination" id="target"></div>
+      <div class="gateway" id="gateway"></div>
+      <div class="timer" id="timer"></div>
+    </div>
+
+    <div id="connected">
+      <div class="marker">linked repeaters/gateways:</div>
+      <table id="linked">
+      </table>
+    </div>
     <div id="meta"></div>
   </main>
   <footer>
@@ -20,19 +37,14 @@
 
   <script>
     const connectedEl    = document.getElementById('connected');
+    const txEl    = document.getElementById('tx');
     const statusEl = document.getElementById('status');
     const metaEl   = document.getElementById('meta');
 
     let ws = null;
     let reconnectTimer = null;
 
-    function renderPayload(payload) {
-      connectedEl.innerHTML = '';                 // wipe previous payload
-
-      const header = document.createElement('div');
-      header.className = 'marker';
-      header.textContent = payload.marker
-      connectedEl.appendChild(header);
+    function renderConnected(payload) {
 
       const cols = [];
       const seen = new Set();
@@ -44,7 +56,8 @@
       }
 
       // --- build the table ---
-      const table = document.createElement('table');
+      const table = document.getElementById('linked');
+      table.textContent = "";
       table.className = 'payload-table';
 
       // thead
@@ -89,6 +102,34 @@
       connectedEl.scrollTop = 0;
     }
 
+    function renderTx(payload) {
+      let currentCall = '';
+      const call = document.getElementById('callsign');
+      const target = document.getElementById('target');
+      const gateway = document.getElementById('gateway');
+
+      console.log(payload);
+
+      if (payload.tx === null) {
+        callsign.textContent = '';
+        target.textContent = '';
+        gateway.textContent = '';
+        timer.stop();
+        timer.reset();
+        return;
+      }
+
+      tx = payload.tx;
+      if (tx.call === currentCall)
+        return;
+
+      currentCall = tx.call;
+      callsign.textContent = payload.tx.call;
+      target.textContent = payload.tx.dest;
+      gateway.textContent = payload.tx.gw;
+      timer.start();
+    }
+
     function connect() {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
       ws = new WebSocket(`${proto}://${location.host}/ws/connections`);
@@ -102,7 +143,8 @@
         if (!ev.data) return;
         let msg;
         try { msg = JSON.parse(ev.data); } catch { return; }
-        if (msg.type === 'payload') renderPayload(msg);
+        if (msg.type === 'connected') renderConnected(msg);
+        else if (msg.type === 'tx') renderTx(msg);
       };
 
       ws.onclose = () => {
@@ -116,6 +158,60 @@
       ws.onerror = () => { try { ws.close(); } catch (_) {} };
     }
 
+    class Timer {
+      constructor(elementId = "timer", maxDurationMs = 3 * 60 * 1000) {
+        this.element = document.getElementById(elementId);
+        this.intervalId = null;
+        this.startTime = 0;
+        this.elapsed = 0;
+        this.maxDurationMs = maxDurationMs;
+      }
+
+      static format(ms) {
+        const totalSeconds = Math.floor(ms / 1000);
+        const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, "0");
+        const seconds = String(totalSeconds % 60).padStart(2, "0");
+        return `${minutes}:${seconds}`;
+      }
+
+      start() {
+        if (this.intervalId !== null) return;
+        this.startTime = Date.now() - this.elapsed;
+        this.render();
+        this.intervalId = setInterval(() => this.tick(), 1000);
+      }
+
+      tick() {
+        this.elapsed = Date.now() - this.startTime;
+
+        if (this.elapsed >= this.maxDurationMs) {
+          this.elapsed = this.maxDurationMs;
+          this.render();
+          this.stop();
+          return;
+        }
+        this.render();
+      }
+
+      stop() {
+        if (this.intervalId === null) return;
+        clearInterval(this.intervalId);
+        this.intervalId = null;
+        this.render();
+      }
+
+      reset() {
+        this.stop();
+        this.elapsed = 0;
+        this.element.textContent = "";
+      }
+
+      render() {
+        this.element.textContent = Timer.format(this.elapsed);
+      }
+    }
+
+    let timer = new Timer();
     connect();
   </script>
 </body>

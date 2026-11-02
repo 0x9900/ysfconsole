@@ -79,6 +79,46 @@ footer a:hover {
   font-size: 14px;
 }
 
+.tx {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr 1fr;
+  align-items: stretch;   /* default, but explicit */
+  width: 100%;
+  box-sizing: border-box;
+  gap: 1rem;
+  border-bottom: 2px solid #555;
+  height: calc(22vh - 60px);
+  color: #aaa;
+  font-size: 34px;
+  font-weight: bold;
+}
+
+.callsign,
+.destination,
+.gateway, 
+.timer {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;   /* vertical centering of content */
+  align-items: center;       /* horizontal centering */
+  height: 100%;
+}
+
+.timer {
+  font-family: "Kode Mono", monospace;
+  font-optical-sizing: auto;
+  font-style: normal;
+  font-variation-settings: "wdth" 100, "ROND" 0;
+  color: rgb(51, 255, 51);
+  letter-spacing: 0.3em;
+  text-shadow: 0 0 2px #0f0, 0 0 3px #0d0, 0 0 7px #0a0;
+}
+
+.callsign {
+  color: #f80;
+  letter-spacing: 0.3em;
+}
+
 .marker {
   font-family: ui-monospace, Menlo, Consolas, monospace;
   color: #e0af68;
