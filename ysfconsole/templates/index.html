@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>{{ reflecror_name }} YSF Reflector</title>
+  <title>{{ reflector_name }} YSF Reflector</title>
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -16,7 +16,6 @@
     <span id="status" class="off">disconnected</span>
   </header>
   <main>
-    <div class="marker">Transmitting:</div>
     <div class="tx">
       <div class="callsign" id="callsign"></div>
       <div class="destination" id="target"></div>
@@ -26,141 +25,39 @@
 
     <div id="connected">
       <div class="marker">linked repeaters/gateways:</div>
-      <table id="linked">
-      </table>
+      <table id="linked" class="payload-table"></table>
     </div>
     <div id="meta"></div>
+
+    <div id="activity" hidden>
+      <div class="marker">recent activity:</div>
+      <table id="recent" class="payload-table"></table>
+    </div>
   </main>
   <footer>
-    © 2027 Fred (W6BSD) <a href="https://tools.bsdworld.org/">https://tools.bsdworld.org/</a>
+    © 2026 Fred (W6BSD) <a href="https://tools.bsdworld.org/">https://tools.bsdworld.org/</a>
   </footer>
 
   <script>
-    const connectedEl    = document.getElementById('connected');
-    const txEl    = document.getElementById('tx');
-    const statusEl = document.getElementById('status');
-    const metaEl   = document.getElementById('meta');
+    'use strict';
 
-    let ws = null;
-    let reconnectTimer = null;
+    const RECONNECT_MS = {{ reconnect_ms }};
+    const MAX_ACTIVITY = {{ max_activity }};
 
-    function renderConnected(payload) {
-
-      const cols = [];
-      const seen = new Set();
-      for (const obj of payload.lines) {
-        if (!obj || obj._parse_error) continue;
-        for (const k of Object.keys(obj)) {
-          if (!seen.has(k)) { seen.add(k); cols.push(k); }
-        }
-      }
-
-      // --- build the table ---
-      const table = document.getElementById('linked');
-      table.textContent = "";
-      table.className = 'payload-table';
-
-      // thead
-      const thead = document.createElement('thead');
-      const headRow = document.createElement('tr');
-      for (const c of cols) {
-        const th = document.createElement('th');
-        th.textContent = c.toUpperCase();
-        headRow.appendChild(th);
-      }
-      thead.appendChild(headRow);
-      table.appendChild(thead);
-
-      // tbody
-      const tbody = document.createElement('tbody');
-      for (const obj of payload.lines) {
-        const tr = document.createElement('tr');
-
-        if (obj && obj._parse_error) {
-          // malformed line — span all columns
-          tr.className = 'bad';
-          const td = document.createElement('td');
-          td.colSpan = Math.max(cols.length, 1);
-          td.textContent = '⚠ unparseable: ' + obj._raw;
-          tr.appendChild(td);
-        } else {
-          for (const c of cols) {
-            const td = document.createElement('td');
-            const v = obj ? obj[c] : undefined;
-            td.textContent = (v === undefined || v === null) ? '' : String(v);
-            tr.appendChild(td);
-          }
-        }
-        tbody.appendChild(tr);
-      }
-      table.appendChild(tbody);
-      connectedEl.appendChild(table);
-
-      // --- meta line (unchanged) ---
-      metaEl.textContent =
-        `${payload.lines.length} Reflector(s) connected — Updated: ${new Date().toLocaleTimeString()}`;
-      connectedEl.scrollTop = 0;
-    }
-
-    function renderTx(payload) {
-      let currentCall = '';
-      const call = document.getElementById('callsign');
-      const target = document.getElementById('target');
-      const gateway = document.getElementById('gateway');
-
-      console.log(payload);
-
-      if (payload.tx === null) {
-        callsign.textContent = '';
-        target.textContent = '';
-        gateway.textContent = '';
-        timer.stop();
-        timer.reset();
-        return;
-      }
-
-      tx = payload.tx;
-      if (tx.call === currentCall)
-        return;
-
-      currentCall = tx.call;
-      callsign.textContent = payload.tx.call;
-      target.textContent = payload.tx.dest;
-      gateway.textContent = payload.tx.gw;
-      timer.start();
-    }
-
-    function connect() {
-      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-      ws = new WebSocket(`${proto}://${location.host}/ws/connections`);
-
-      ws.onopen = () => {
-        statusEl.textContent = 'connected';
-        statusEl.className = 'on';
-      };
-
-      ws.onmessage = (ev) => {
-        if (!ev.data) return;
-        let msg;
-        try { msg = JSON.parse(ev.data); } catch { return; }
-        if (msg.type === 'connected') renderConnected(msg);
-        else if (msg.type === 'tx') renderTx(msg);
-      };
-
-      ws.onclose = () => {
-        statusEl.textContent = 'disconnected';
-        statusEl.className = 'off';
-        ws = null;
-        clearTimeout(reconnectTimer);
-        reconnectTimer = setTimeout(connect, 2000);
-      };
-
-      ws.onerror = () => { try { ws.close(); } catch (_) {} };
-    }
+    const $ = (id) => document.getElementById(id);
+    const connectedEl = $('connected');
+    const tableEl     = $('linked');
+    const statusEl    = $('status');
+    const metaEl      = $('meta');
+    const callsignEl  = $('callsign');
+    const targetEl    = $('target');
+    const gatewayEl   = $('gateway');
+    const activityEl  = $('activity');
+    const recentEl    = $('recent');
 
     class Timer {
-      constructor(elementId = "timer", maxDurationMs = 3 * 60 * 1000) {
-        this.element = document.getElementById(elementId);
+      constructor(elementId = 'timer', maxDurationMs = 3 * 60 * 1000) {
+        this.element = $(elementId);
         this.intervalId = null;
         this.startTime = 0;
         this.elapsed = 0;
@@ -169,8 +66,8 @@
 
       static format(ms) {
         const totalSeconds = Math.floor(ms / 1000);
-        const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, "0");
-        const seconds = String(totalSeconds % 60).padStart(2, "0");
+        const minutes = String(Math.floor(totalSeconds / 60)).padStart(2, '0');
+        const seconds = String(totalSeconds % 60).padStart(2, '0');
         return `${minutes}:${seconds}`;
       }
 
@@ -182,15 +79,9 @@
       }
 
       tick() {
-        this.elapsed = Date.now() - this.startTime;
-
-        if (this.elapsed >= this.maxDurationMs) {
-          this.elapsed = this.maxDurationMs;
-          this.render();
-          this.stop();
-          return;
-        }
+        this.elapsed = Math.min(Date.now() - this.startTime, this.maxDurationMs);
         this.render();
+        if (this.elapsed >= this.maxDurationMs) this.stop();
       }
 
       stop() {
@@ -203,7 +94,7 @@
       reset() {
         this.stop();
         this.elapsed = 0;
-        this.element.textContent = "";
+        this.element.textContent = '';
       }
 
       render() {
@@ -211,7 +102,137 @@
       }
     }
 
-    let timer = new Timer();
+    const timer = new Timer();
+    let currentCall = '';
+    let ws = null;
+    let reconnectTimer = null;
+
+    function renderConnected(payload) {
+      const lines = payload.lines.filter(Boolean);
+
+      // Columns = union of keys, in order of first appearance.
+      const cols = [...new Set(lines.flatMap(Object.keys))];
+
+      const thead = document.createElement('thead');
+      const headRow = document.createElement('tr');
+      for (const c of cols) {
+        const th = document.createElement('th');
+        th.textContent = c.toUpperCase();
+        headRow.appendChild(th);
+      }
+      thead.appendChild(headRow);
+
+      const tbody = document.createElement('tbody');
+      for (const obj of lines) {
+        const tr = document.createElement('tr');
+        for (const c of cols) {
+          const td = document.createElement('td');
+          td.textContent = obj[c] ?? '';
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+
+      tableEl.replaceChildren(thead, tbody);
+
+      metaEl.textContent =
+        `${lines.length} Reflector(s) connected — Updated: ${new Date().toLocaleTimeString()}`;
+      connectedEl.scrollTop = 0;
+    }
+
+    function clearTx() {
+      currentCall = '';
+      callsignEl.textContent = '';
+      targetEl.textContent = '';
+      gatewayEl.textContent = '';
+      timer.reset();
+    }
+
+    const activity = [];                      // newest first
+
+    function addActivity(tx) {
+      activity.unshift({
+        Time: new Date().toLocaleTimeString(),
+        Call: tx.call,
+        Destination: tx.dest,
+        Gateway: tx.gw,
+      });
+      activity.length = Math.min(activity.length, MAX_ACTIVITY);
+
+      const cols = ['Time', 'Call', 'Destination', 'Gateway'];
+
+      const headRow = document.createElement('tr');
+      for (const c of cols) {
+        const th = document.createElement('th');
+        th.textContent = c.toUpperCase();
+        headRow.appendChild(th);
+      }
+      const thead = document.createElement('thead');
+      thead.appendChild(headRow);
+
+      const tbody = document.createElement('tbody');
+      for (const entry of activity) {
+        const tr = document.createElement('tr');
+        for (const c of cols) {
+          const td = document.createElement('td');
+          td.textContent = entry[c] ?? '';
+          tr.appendChild(td);
+        }
+        tbody.appendChild(tr);
+      }
+
+      recentEl.replaceChildren(thead, tbody);
+      activityEl.hidden = false;
+    }
+
+    function renderTx({ tx }) {
+      if (tx === null) {
+        clearTx();
+        return;
+      }
+      // The server sends a "tx" message for every received-data line;
+      // only react when the transmitting station changes.
+      if (tx.call === currentCall) return;
+
+      currentCall = tx.call;
+      addActivity(tx);
+      callsignEl.textContent = tx.call;
+      targetEl.textContent = tx.dest;
+      gatewayEl.textContent = tx.gw;
+      timer.reset();
+      timer.start();
+    }
+
+    function setStatus(on) {
+      statusEl.textContent = on ? 'connected' : 'disconnected';
+      statusEl.className = on ? 'on' : 'off';
+    }
+
+    function connect() {
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      ws = new WebSocket(`${proto}://${location.host}/ws/connections`);
+
+      ws.onopen = () => setStatus(true);
+
+      ws.onmessage = (ev) => {
+        if (!ev.data) return;                 // server keep-alive
+        let msg;
+        try { msg = JSON.parse(ev.data); } catch { return; }
+        if (msg.type === 'connected') renderConnected(msg);
+        else if (msg.type === 'tx') renderTx(msg);
+      };
+
+      ws.onclose = () => {
+        setStatus(false);
+        clearTx();                            // don't show a stale transmission
+        ws = null;
+        clearTimeout(reconnectTimer);
+        reconnectTimer = setTimeout(connect, RECONNECT_MS);
+      };
+
+      ws.onerror = () => ws?.close();
+    }
+
     connect();
   </script>
 </body>

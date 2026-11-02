@@ -5,6 +5,8 @@
 #
 # Distributed under terms of the BSD 3-Clause license.
 
+from __future__ import annotations
+
 import atexit
 import glob
 import json
@@ -15,13 +17,12 @@ import re
 import threading
 import time
 from pathlib import Path
+from typing import Any, BinaryIO
 
-from flask import Flask, current_app, render_template
+from flask import Flask, render_template
 from flask_sock import Sock
 
 from .config import Config
-
-from pprint import pprint
 
 
 TS_LEN = 27                                   # width of the timestamp prefix
@@ -38,30 +39,41 @@ RE_WD = re.compile(
   r'^Network watchdog has expired'
 )
 
-logging.basicConfig()
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
-
-
-def is_marker(line: str) -> bool:
-  return bool(Config.log_marker.search(line))
 
 
 def _line_body(raw: bytes) -> str:
   return raw.decode("utf-8", errors="replace").rstrip("\r\n")[TS_LEN:]
 
 
-def find_last_marker(f) -> int:
-  """Offset of the last marker line, or EOF if none. `f` must be binary."""
-  f.seek(0)
-  last = None
+def find_last_marker(f: BinaryIO, marker: re.Pattern[str]) -> int:
+  """Offset of the last marker line, or EOF if none. `f` must be binary.
+
+  Scans backwards in growing windows, so start-up cost depends on how far
+  back the last marker is, not on the size of the log.
+  """
+  size = f.seek(0, os.SEEK_END)
+  window = 1 << 16
   while True:
-    pos = f.tell()
-    raw = f.readline()
-    if not raw:
-      return pos if last is None else last
-    if is_marker(_line_body(raw)):
-      last = pos
+    start = max(0, size - window)
+    f.seek(start)
+    if start:
+      f.readline()              # discard the (probably partial) first line
+    last = None
+    while True:
+      pos = f.tell()
+      raw = f.readline()
+      if not raw:
+        break
+      if marker.search(_line_body(raw)):
+        last = pos
+    if last is not None:
+      return last
+    if start == 0:
+      return size
+    window *= 4
+
 
 # --- Broadcast hub -----------------------------------------------------------
 class PayloadHub:
@@ -71,50 +83,61 @@ class PayloadHub:
   A payload = the marker line plus every subsequent line, up to (but not
   including) the next marker — or up to an idle timeout.
 
-  Each connected client receives one JSON message per completed payload:
+  Each connected client receives one JSON message per event:
 
-      {"type": "payload", "marker": "...", "lines": ["...", "..."]}
+      {"type": "connected", "marker": "...", "lines": [{...}, ...]}
+      {"type": "tx", "tx": {...} | null}
+
+  New clients are sent the latest message of each type on registration.
   """
 
-  def __init__(self, path, prefix, poll_interval, idle_flush):
-    self.log_dir = Path(path)
-    self.pattern = prefix        # e.g. "ysfreflector*.log"
+  def __init__(
+    self,
+    log_dir: str | Path,
+    pattern: str,
+    poll_interval: float,
+    idle_flush: float,
+    marker: re.Pattern[str],
+    max_payload_lines: int,
+  ) -> None:
+    self.log_dir = Path(log_dir)
+    self.pattern = pattern        # e.g. "ysfreflector*.log"
     self.poll_interval = poll_interval
     self.idle_flush = idle_flush
+    self.marker = marker
+    self.max_payload_lines = max_payload_lines
 
-    self.path = path / prefix
-
-    self.clients = set()
+    self.clients: set[queue.Queue[str]] = set()
     self.lock = threading.Lock()
 
-    # The payload currently being assembled (None if we haven't seen a marker yet).
-    self.current_marker = None
-    self.current_lines = []
-    self.current_tx = None
-    self.activity = []
-    self.last_line_at = 0.0     # monotonic timestamp of last received line
+    # State below is only touched by the tail thread.
+    self.current_marker: str | None = None
+    self.current_lines: list[dict[str, Any]] = []
+    self.current_tx: dict[str, Any] | None = None
+    self.last_line_at = time.monotonic()
 
-    # The most recently completed payload, replayed to new clients.
-    self.last_payload = None
+    # Latest serialized message per payload type, replayed to new clients.
+    self._replay: dict[str, str] = {}
 
-    self._thread = None
+    self._thread: threading.Thread | None = None
     self._stop = threading.Event()
 
   # ---- client management ----
-  def register(self, client_queue):
+  def register(self, client_queue: queue.Queue[str]) -> None:
     with self.lock:
       self.clients.add(client_queue)
-      if self.last_payload is not None:
-        client_queue.put(json.dumps(self.last_payload))
+      for msg in self._replay.values():
+        client_queue.put_nowait(msg)
 
-  def unregister(self, client_queue):
+  def unregister(self, client_queue: queue.Queue[str]) -> None:
     with self.lock:
       self.clients.discard(client_queue)
 
-  def _emit(self, payload):
+  def _emit(self, payload: dict[str, Any]) -> None:
+    log.debug("emit %r", payload)
     msg = json.dumps(payload)
     with self.lock:
-      self.last_payload = payload
+      self._replay[payload["type"]] = msg
       for q in list(self.clients):
         try:
           q.put_nowait(msg)
@@ -125,50 +148,43 @@ class PayloadHub:
           except (queue.Empty, queue.Full):
             self.clients.discard(q)
 
-  def _flush_connected(self):
+  def _flush_connected(self) -> None:
     """If we have a buffered payload, emit it and clear the buffer."""
+    if self.current_marker is None:
+      return
     payload = {
       "type": "connected",
       "marker": self.current_marker,
-      "lines": list(self.current_lines),
+      "lines": self.current_lines,
     }
-    pprint(payload)
+    self._reset_buffer()
+    self._emit(payload)
+
+  def _set_tx(self, tx: dict[str, Any] | None) -> None:
+    self.current_tx = tx
+    self._emit({"type": "tx", "tx": tx})
+
+  def _reset_buffer(self) -> None:
     self.current_marker = None
     self.current_lines = []
-    self._emit(payload)
 
-  def _flush_tx(self):
-    payload = {
-      "type": "tx",
-      "tx": self.current_tx,
-    }
-    pprint(payload)
-    self._emit(payload)
-
-  def start(self):
-    log.info('Log watch started')
+  # ---- lifecycle ----
+  def start(self) -> None:
     if self._thread and self._thread.is_alive():
       return
+    log.info('Log watch started')
     self._stop.clear()
     self._thread = threading.Thread(target=self._tail_loop, daemon=True)
     self._thread.start()
 
-  def stop(self):
+  def stop(self) -> None:
     self._stop.set()
     if self._thread:
       self._thread.join(timeout=2)
 
-  def _append_line(self, line: str):
-    if match := RE_TX.match(line):
-      self.current_tx = match.groupdict()
-    elif RE_RX.match(line):
-      self.current_tx = None
-    elif len(self.current_lines) < Config.max_payload_lines:
-      if match := RE_GW.match(line):
-        self.current_lines.append(match.groupdict())
-
+  # ---- log handling ----
   def _newest_log(self) -> str | None:
-    def mtime(p):
+    def mtime(p: str) -> float:
       try:
         return os.stat(p).st_mtime
       except OSError:
@@ -176,36 +192,36 @@ class PayloadHub:
     files = glob.glob(str(self.log_dir / self.pattern))
     return max(files, key=mtime, default=None)
 
-  def _open(self, name, from_start=False):
+  def _open(self, name: str, from_start: bool = False) -> BinaryIO:
     log.info('open %s', name)
     f = open(name, "rb")
-    if not from_start:
-      f.seek(find_last_marker(f))
+    try:
+      if not from_start:
+        f.seek(find_last_marker(f, self.marker))
+    except Exception:
+      f.close()
+      raise
     return f
 
-
-  def _handle_line(self, raw: bytes):
+  def _handle_line(self, raw: bytes) -> None:
     body = _line_body(raw)
     if not body:
-        return
-
-    log.debug("raw=%r body=%r marker=%s cur=%r",
-              raw, body, is_marker(body) if body else None, self.current_marker)
+      return
 
     self.last_line_at = time.monotonic()
     if RE_RX.match(body) or RE_WD.match(body):
-      self.current_tx = None
-      self._flush_tx()
-    elif RE_TX.match(body):
-      self._append_line(body)
-      self._flush_tx()
-    elif is_marker(body):
+      self._set_tx(None)
+    elif m := RE_TX.match(body):
+      self._set_tx(m.groupdict())
+    elif self.marker.search(body):
+      self._flush_connected()           # previous payload ends here
       self.current_marker = body
     elif self.current_marker is not None:
-      self._append_line(body)
+      if len(self.current_lines) < self.max_payload_lines:
+        if m := RE_GW.match(body):
+          self.current_lines.append(m.groupdict())
 
-
-  def _check_rotation(self, f):
+  def _check_rotation(self, f: BinaryIO) -> BinaryIO | None:
     """
     Called at EOF. Returns `f` if it is still the right file, otherwise a
     replacement file object, or None to force a fresh open.
@@ -227,21 +243,16 @@ class PayloadHub:
 
     if st_path.st_size < f.tell():             # truncated in place
       self._reset_buffer()
-      f.seek(find_last_marker(f))
+      f.seek(find_last_marker(f, self.marker))
     return f
 
-  def _maybe_idle_flush(self):
+  def _maybe_idle_flush(self) -> None:
     if (self.current_marker is not None
         and time.monotonic() - self.last_line_at >= self.idle_flush):
       self._flush_connected()
 
-  def _reset_buffer(self):
-    return
-    self.current_marker = None
-    self.current_lines = []
-
-  def _tail_loop(self):
-    f = None
+  def _tail_loop(self) -> None:
+    f: BinaryIO | None = None
     pending = b""
     try:
       while not self._stop.is_set():
@@ -289,9 +300,15 @@ class PayloadHub:
 def create_app() -> Flask:
   app = Flask(__name__)
   sock = Sock(app)
-  sock.init_app(app)
 
-  hub = PayloadHub(Config.log_path, Config.log_prefix, Config.poll_interval, Config.idle_flush)
+  hub = PayloadHub(
+    Config.log_path,
+    Config.log_prefix,
+    Config.poll_interval,
+    Config.idle_flush,
+    Config.log_marker,
+    Config.max_payload_lines,
+  )
   app.extensions["payload_hub"] = hub
   hub.start()
   atexit.register(hub.stop)
@@ -299,29 +316,35 @@ def create_app() -> Flask:
   # --- Routes ------------------------------------------------------------------
   @app.route("/")
   def index():
-    return render_template("index.html", reflector_name=Config.reflector_name)
+    reconnect_ms = Config.reconnect_ms
+    max_activity = Config.max_activity
+    reflector_name = Config.reflector_name
+    return render_template("index.html",
+                           reflector_name=reflector_name,
+                           reconnect_ms=reconnect_ms,
+                           max_activity=max_activity)
 
   @sock.route("/ws/connections")
   def ws_connections(ws):
-    q: "queue.Queue[str]" = queue.Queue(maxsize=64)
+    q: queue.Queue[str] = queue.Queue(maxsize=64)
     hub.register(q)
     try:
       while True:
         try:
           msg = q.get(timeout=5.0)
         except queue.Empty:
-          ws.send("")     # keep-alive / detect dead clients
-          continue
+          msg = ""                # keep-alive / detect dead clients
         ws.send(msg)
     except Exception:
-      pass
+      log.debug("websocket closed", exc_info=True)
     finally:
       hub.unregister(q)
 
   return app
 
 
-def run():
+def run() -> None:
+  logging.basicConfig()
   Config.load_config()
   create_app().run(host=Config.bind_address, port=Config.bind_port, debug=False)
 

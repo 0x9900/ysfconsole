@@ -81,13 +81,13 @@ footer a:hover {
 
 .tx {
   display: grid;
-  grid-template-columns: 1fr 1fr 1fr 1fr;
+  grid-template-columns: repeat(4, 1fr);
   align-items: stretch;   /* default, but explicit */
   width: 100%;
   box-sizing: border-box;
   gap: 1rem;
   border-bottom: 2px solid #555;
-  height: calc(22vh - 60px);
+  height: 2em;
   color: #aaa;
   font-size: 34px;
   font-weight: bold;
@@ -119,9 +119,15 @@ footer a:hover {
   letter-spacing: 0.3em;
 }
 
+.destination,
+.gateway {
+  font-size: 18px;
+  font-weight: 400;
+}
+
 .marker {
-  font-family: ui-monospace, Menlo, Consolas, monospace;
-  color: #e0af68;
+  font-size: 28px;
+  color: #999;
   font-weight: 600;
   margin: .7em;
 }
@@ -145,7 +151,7 @@ footer a:hover {
 
 .payload-table th {
   background: #1c1c1c;
-  color: #aaa;
+  color: #999;
   font-weight: 600;
   position: sticky;
   top: 0;

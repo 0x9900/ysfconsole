@@ -4,4 +4,6 @@ log_marker        = "Currently linked repeaters/gateways"
 reflector_name    = "US-BayArea-YSF"
 poll_interval     = 0.5
 idle_flush        = 3.0
-max_payload_lines = 10000
+max_payload_lines = 150
+max_activity      = 25
+reconnect_ms      = 2000
