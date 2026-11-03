@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ysfconsole"
-version = "0.1.7"
+dynamic = ["version"]
 description = "Monitor the connections on a YSF reflector"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -36,6 +36,9 @@ dev = [
   "ipython",
   "ipdb",
 ]
+
+[tool.setuptools.dynamic]
+version = {attr = "ysfconsole.__version__"}
 
 [project.scripts]
 ysfrun = "ysfconsole.run:main"
