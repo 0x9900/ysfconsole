@@ -26,7 +26,7 @@ class Config:
   log_prefix: str = "ysfreflector*.log"
   reflector_name: str = "YSF Reflector"
   reconnect_ms: int = 2000
-  max_activity: int = 25
+  max_activity: int = 20
   poll_interval: float = 0.5
   idle_flush: float = 3.0
   max_payload_lines: int = 10000

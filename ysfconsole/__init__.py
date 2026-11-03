@@ -11,11 +11,13 @@ import atexit
 import glob
 import json
 import logging
+import operator
 import os
 import queue
 import re
 import threading
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -24,26 +26,39 @@ from flask_sock import Sock
 
 from .config import Config
 
-TS_LEN = 27                                   # width of the timestamp prefix
+KEEPALIVE_INTERVAL = 30.0
+
 RE_GW = re.compile(
-  r'^\s*(?P<call>\w+)\s*:\s*(?P<ip>.+):(?P<port>\d+)\s+(\d+/\d+)\s*$'
+  r'^\w:\s+(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)'
+  r'\s*(?P<call>\w+)'
+  r'\s*:\s*'
+  r'(?P<ip_address>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d{1,5})\s+(\d+/\d+)$'
 )
+
 RE_TX = re.compile(
-  r'^Received data from (?P<call>\w+)\s+to\s(?P<dest>\w+)\s+at\s(?P<gw>\w+)'
+  r'^\w:\s+(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)'
+  r'\s*Received data from (?P<call>\w+)\s+to\s(?P<dest>\w+)\s+at\s(?P<gw>\w+)'
 )
 RE_RX = re.compile(
-  r'^Received end of transmission'
+  r'^\w:\s+(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)'
+  r'\s*Received (?P<end>end) of transmission'
 )
 RE_WD = re.compile(
-  r'^Network watchdog has expired'
+  r'^\w:\s+(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)'
+  r'\s*Network watchdog has (?P<end>expired)'
 )
 
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
 
-def _line_body(raw: bytes) -> str:
-  return raw.decode("utf-8", errors="replace").rstrip("\r\n")[TS_LEN:]
+def line_body(raw: bytes) -> str:
+  return raw.decode("utf-8", errors="replace").rstrip("\r\n")
+
+
+def isodate(value):
+  tm = datetime.strptime(value, '%Y-%m-%d %H:%M:%S.%f')
+  return tm.isoformat()
 
 
 def find_last_marker(f: BinaryIO, marker: re.Pattern[str]) -> int:
@@ -65,13 +80,37 @@ def find_last_marker(f: BinaryIO, marker: re.Pattern[str]) -> int:
       raw = f.readline()
       if not raw:
         break
-      if marker.search(_line_body(raw)):
+      if marker.search(line_body(raw)):
         last = pos
     if last is not None:
       return last
     if start == 0:
       return size
     window *= 4
+
+
+# ---- log handling ----
+def newest_log(log_dir: Path, pattern: re.Pattern[str]) -> str | None:
+  def mtime(p: str) -> float:
+    try:
+      return os.stat(p).st_mtime
+    except OSError:
+      return -1
+  files = glob.glob(str(log_dir / pattern))
+  return max(files, key=mtime, default=None)
+
+
+def open_and_seek(name: str, marker: str, from_start: bool = False) -> BinaryIO:
+  # pylint: disable=consider-using-with
+  log.info('open %s', name)
+  f = open(name, "rb")
+  try:
+    if not from_start:
+      f.seek(find_last_marker(f, marker))
+  except Exception:
+    f.close()
+    raise
+  return f
 
 
 # --- Broadcast hub -----------------------------------------------------------
@@ -179,30 +218,8 @@ class PayloadHub:
     if self._thread:
       self._thread.join(timeout=2)
 
-  # ---- log handling ----
-  def _newest_log(self) -> str | None:
-    def mtime(p: str) -> float:
-      try:
-        return os.stat(p).st_mtime
-      except OSError:
-        return -1
-    files = glob.glob(str(self.log_dir / self.pattern))
-    return max(files, key=mtime, default=None)
-
-  def _open(self, name: str, from_start: bool = False) -> BinaryIO:
-    # pylint: disable=consider-using-with
-    log.info('open %s', name)
-    f = open(name, "rb")
-    try:
-      if not from_start:
-        f.seek(find_last_marker(f, self.marker))
-    except Exception:
-      f.close()
-      raise
-    return f
-
   def _handle_line(self, raw: bytes) -> None:
-    body = _line_body(raw)
+    body = line_body(raw)
     if not body:
       return
 
@@ -210,14 +227,18 @@ class PayloadHub:
     if RE_RX.match(body) or RE_WD.match(body):
       self._set_tx(None)
     elif m := RE_TX.match(body):
-      self._set_tx(m.groupdict())
+      data = m.groupdict()
+      data['time'] = isodate(data['time'])
+      self._set_tx(data)
     elif self.marker.search(body):
       self._flush_connected()           # previous payload ends here
       self.current_marker = body
     elif self.current_marker is not None:
       if len(self.current_lines) < self.max_payload_lines:
         if m := RE_GW.match(body):
-          self.current_lines.append(m.groupdict())
+          data = m.groupdict()
+          data['time'] = isodate(data['time'])
+          self.current_lines.append(data)
 
   def _check_rotation(self, f: BinaryIO) -> BinaryIO | None:
     """
@@ -231,13 +252,13 @@ class PayloadHub:
       f.close()
       return None
 
-    newest = self._newest_log()
+    newest = newest_log(self.log_dir, self.pattern)
     replaced = st_path.st_ino != os.fstat(f.fileno()).st_ino
     if replaced or (newest and newest != f.name):
       # At EOF, so the old file is fully drained. Switch to the new one.
       self._flush_connected()
       f.close()
-      return self._open(newest or f.name, from_start=True)
+      return open_and_seek(newest or f.name, self.marker, from_start=True)
 
     if st_path.st_size < f.tell():             # truncated in place
       self._reset_buffer()
@@ -257,11 +278,11 @@ class PayloadHub:
         try:
           # (Re)open the newest matching file, resuming at its last marker.
           if f is None:
-            name = self._newest_log()
+            name = newest_log(self.log_dir, self.pattern)
             if name is None:
               self._stop.wait(self.poll_interval)
               continue
-            f = self._open(name)
+            f = open_and_seek(name, self.marker)
             pending = b""
 
           raw = f.readline()
@@ -295,8 +316,24 @@ class PayloadHub:
         f.close()
 
 
+def get_traffic() -> list[dict]:
+  traffic = []
+  name = newest_log(Config.log_path, Config.log_prefix)
+  with open(name, 'rb') as fd:
+    for body in (line_body(r) for r in fd):
+      if m := RE_TX.match(body):
+        data = m.groupdict()
+        data['time'] = isodate(data['time'])
+        traffic.append(data)
+
+  return sorted(traffic, key=operator.itemgetter('time'), reverse=True)[:10]
+
+
 def create_app() -> Flask:
   app = Flask(__name__)
+  app.config["SOCK_SERVER_OPTIONS"] = {
+    "ping_interval": 25,
+  }
   sock = Sock(app)
 
   hub = PayloadHub(
@@ -314,11 +351,13 @@ def create_app() -> Flask:
   # --- Routes ------------------------------------------------------------------
   @app.route("/")
   def index():
+    last_traffic = get_traffic()
     reconnect_ms = Config.reconnect_ms
     max_activity = Config.max_activity
     reflector_name = Config.reflector_name
     return render_template("index.html",
                            reflector_name=reflector_name,
+                           last_traffic=last_traffic,
                            reconnect_ms=reconnect_ms,
                            max_activity=max_activity)
 
@@ -329,11 +368,11 @@ def create_app() -> Flask:
     try:
       while True:
         try:
-          msg = q.get(timeout=5.0)
+          msg = q.get(timeout=KEEPALIVE_INTERVAL)
         except queue.Empty:
-          msg = ""      # keep-alive / detect dead clients
+          msg = ""  # keep-alive
         ws.send(msg)
-    except Exception:   # pylint: disable=broad-exception-caught
+    except Exception:  # pylint: disable=broad-exception-caught
       log.debug("websocket closed", exc_info=True)
     finally:
       hub.unregister(q)

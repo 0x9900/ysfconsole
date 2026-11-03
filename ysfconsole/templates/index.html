@@ -6,7 +6,7 @@
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Kode+Mono:wght@400..700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Kode+Mono:wght@400..700&family=Source+Code+Pro:ital,wght@0,200..900;1,200..900&display=swap" rel="stylesheet">
 
   <link rel="stylesheet" href="/static/ysfconsole.css">
 </head>
@@ -24,10 +24,10 @@
     </div>
 
     <div id="connected">
-      <div class="marker">linked repeaters/gateways:</div>
+      <div class="marker">Linked repeaters/gateways:</div>
+      <div id="meta"></div>
       <table id="linked" class="payload-table"></table>
     </div>
-    <div id="meta"></div>
 
     <div id="activity" hidden>
       <div class="marker">Recent activity:</div>
@@ -47,6 +47,7 @@
 
     const RECONNECT_MS = {{ reconnect_ms }};
     const MAX_ACTIVITY = {{ max_activity }};
+    const SERVER_ACTIVITY = {{ last_traffic|tojson }};
 
     const $ = (id) => document.getElementById(id);
     const connectedEl = $('connected');
@@ -111,30 +112,47 @@
     let ws = null;
     let reconnectTimer = null;
 
+    function makeRow(entry, cols, linkColumn) {
+      const tr = document.createElement('tr');
+      for (const col of cols) {
+        const td = document.createElement('td');
+        const value = entry[col] ?? '';
+
+        if (col.toLowerCase() === 'time' && value) {
+          td.textContent = new Date(value).toLocaleString();
+        } else if (col === linkColumn && value) {
+          const a = document.createElement('a');
+          a.href = `https://qrz.com/db/${value}`;
+          a.textContent = value;
+          a.target = '_blank';
+          a.rel = 'noopener noreferrer';
+          td.appendChild(a);
+        } else {
+          td.textContent = value;
+        }
+        tr.appendChild(td);
+      }
+      return tr;
+    }
+
     function renderConnected(payload) {
       const lines = payload.lines.filter(Boolean);
 
       // Columns = union of keys, in order of first appearance.
       const cols = [...new Set(lines.flatMap(Object.keys))];
 
-      const thead = document.createElement('thead');
       const headRow = document.createElement('tr');
       for (const c of cols) {
         const th = document.createElement('th');
         th.textContent = c.toUpperCase();
         headRow.appendChild(th);
       }
+      const thead = document.createElement('thead');
       thead.appendChild(headRow);
 
       const tbody = document.createElement('tbody');
       for (const obj of lines) {
-        const tr = document.createElement('tr');
-        for (const c of cols) {
-          const td = document.createElement('td');
-          td.textContent = obj[c] ?? '';
-          tr.appendChild(td);
-        }
-        tbody.appendChild(tr);
+        tbody.appendChild(makeRow(obj, cols, 'call'));
       }
 
       tableEl.replaceChildren(thead, tbody);
@@ -154,15 +172,24 @@
 
     const activity = [];                      // newest first
 
-    function addActivity(tx) {
-      activity.unshift({
-        Time: new Date().toLocaleTimeString(),
-        Call: tx.call,
-        Destination: tx.dest,
-        Gateway: tx.gw,
-      });
+    // Populate from server on page load
+    if (SERVER_ACTIVITY && SERVER_ACTIVITY.length) {
+      for (const raw of SERVER_ACTIVITY) {
+        activity.push({
+          Time: raw.time,
+          Call: raw.call,
+          Destination: raw.dest,
+          Gateway: raw.gw,
+        });
+      }
       activity.length = Math.min(activity.length, MAX_ACTIVITY);
 
+      // Render the seeded activity
+      renderActivityTable();
+      activityEl.hidden = false;
+    }
+
+    function renderActivityTable() {
       const cols = ['Time', 'Call', 'Destination', 'Gateway'];
 
       const headRow = document.createElement('tr');
@@ -176,16 +203,22 @@
 
       const tbody = document.createElement('tbody');
       for (const entry of activity) {
-        const tr = document.createElement('tr');
-        for (const c of cols) {
-          const td = document.createElement('td');
-          td.textContent = entry[c] ?? '';
-          tr.appendChild(td);
-        }
-        tbody.appendChild(tr);
+        tbody.appendChild(makeRow(entry, cols, 'Call'));
       }
 
       recentEl.replaceChildren(thead, tbody);
+    }
+
+
+    function addActivity(tx) {
+      activity.unshift({
+        Time: tx.time,          // keep ISO for sorting
+        Call: tx.call,
+        Destination: tx.dest,
+        Gateway: tx.gw,
+      });
+      activity.length = Math.min(activity.length, MAX_ACTIVITY);
+      renderActivityTable();
       activityEl.hidden = false;
     }
 
