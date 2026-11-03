@@ -358,6 +358,7 @@ def create_app() -> Flask:
     max_activity = Config.max_activity
     reflector_name = Config.reflector_name
     return render_template("index.html",
+                           version=__version__,
                            reflector_name=reflector_name,
                            last_traffic=last_traffic,
                            reconnect_ms=reconnect_ms,
