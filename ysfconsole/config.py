@@ -25,6 +25,7 @@ class Config:
   log_path: Path = Path("/var/log/mmdvm")
   log_prefix: str = "ysfreflector*.log"
   reflector_name: str = "YSF Reflector"
+  reflector_id: str = "#00000"
   reconnect_ms: int = 2000
   max_activity: int = 20
   poll_interval: float = 0.5

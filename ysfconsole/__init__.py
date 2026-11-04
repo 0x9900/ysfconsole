@@ -26,7 +26,7 @@ from flask_sock import Sock
 
 from .config import Config
 
-__version__ = "0.1.8"
+__version__ = "0.1.9"
 
 KEEPALIVE_INTERVAL = 30.0
 
@@ -410,6 +410,7 @@ def create_app() -> Flask:
     return render_template("index.html",
                            version=__version__,
                            reflector_name=reflector_name,
+                           reflector_id=Config.reflector_id,
                            last_traffic=last_traffic,
                            reconnect_ms=reconnect_ms,
                            max_activity=max_activity)

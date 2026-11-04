@@ -2,7 +2,13 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>{{ reflector_name }} YSF Reflector</title>
+  <title>{{ reflector_name }} YSF Reflector {{ reflector_id }}</title>
+
+  <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+  <meta name="description" content="{{ reflector_name }} Reflector Dashboard by W6BSD">
+  <meta name="author" content="W6BSD">
+  <meta name="copyright" content="Fred C. (W6BSD)">
+  <meta name="keywords" content="c4fm, reflector, ysf protocol, yaesu, {{ reflector_name }}">
 
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -12,7 +18,7 @@
 </head>
 <body>
   <header>
-    <h1>Live Reflector — <code>{{ reflector_name }}</code></h1>
+    <h1>Live Reflector — {{ reflector_name }} — {{ reflector_id }}</h1>
     <span id="status" class="off">disconnected</span>
   </header>
   <main>
