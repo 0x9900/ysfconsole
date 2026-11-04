@@ -11,13 +11,13 @@ import atexit
 import glob
 import json
 import logging
-import operator
 import os
 import queue
 import re
 import threading
 import time
-from datetime import datetime
+from collections import deque
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -35,6 +35,19 @@ RE_GW = re.compile(
   r'\s*(?P<call>\w+)'
   r'\s*:\s*'
   r'(?P<ip_address>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d{1,5})\s+(\d+/\d+)$'
+)
+
+RE_RM = re.compile(
+  r'^\w:\s+(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)'
+  r'\s*Removing\s(?P<call>\w+)\s*'
+  r'\((?P<ip_address>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d{1,5})\)'
+  r'\s*unlinked$'
+)
+
+RE_ADD = re.compile(
+  r'^\w:\s+(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)'
+  r'\s*Adding\s(?P<call>\w+)\s*'
+  r'\((?P<ip_address>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d{1,5})\)'
 )
 
 RE_TX = re.compile(
@@ -56,11 +69,6 @@ log.setLevel(logging.INFO)
 
 def line_body(raw: bytes) -> str:
   return raw.decode("utf-8", errors="replace").rstrip("\r\n")
-
-
-def isodate(value):
-  tm = datetime.strptime(value, '%Y-%m-%d %H:%M:%S.%f')
-  return tm.isoformat()
 
 
 def find_last_marker(f: BinaryIO, marker: re.Pattern[str]) -> int:
@@ -92,7 +100,7 @@ def find_last_marker(f: BinaryIO, marker: re.Pattern[str]) -> int:
 
 
 # ---- log handling ----
-def newest_log(log_dir: Path, pattern: re.Pattern[str]) -> str | None:
+def newest_log(log_dir: Path, pattern: str) -> str | None:
   def mtime(p: str) -> float:
     try:
       return os.stat(p).st_mtime
@@ -102,7 +110,7 @@ def newest_log(log_dir: Path, pattern: re.Pattern[str]) -> str | None:
   return max(files, key=mtime, default=None)
 
 
-def open_and_seek(name: str, marker: str, from_start: bool = False) -> BinaryIO:
+def open_and_seek(name: str, marker: re.Pattern[str], from_start: bool = False) -> BinaryIO:
   # pylint: disable=consider-using-with
   log.info('open %s', name)
   f = open(name, "rb")
@@ -144,6 +152,7 @@ class PayloadHub:
     self.idle_flush = idle_flush
     self.marker = marker
     self.max_payload_lines = max_payload_lines
+    self._connected: list[dict[str, Any]] = []   # last known full list
 
     self.clients: set[queue.Queue[str]] = set()
     self.lock = threading.Lock()
@@ -151,7 +160,6 @@ class PayloadHub:
     # State below is only touched by the tail thread.
     self.current_marker: str | None = None
     self.current_lines: list[dict[str, Any]] = []
-    self.current_tx: dict[str, Any] | None = None
     self.last_line_at = time.monotonic()
 
     # Latest serialized message per payload type, replayed to new clients.
@@ -175,7 +183,8 @@ class PayloadHub:
     log.debug("emit %r", payload)
     msg = json.dumps(payload)
     with self.lock:
-      self._replay[payload["type"]] = msg
+      if payload["type"] not in ("rm", "add"):   # events, not state
+        self._replay[payload["type"]] = msg
       for q in list(self.clients):
         try:
           q.put_nowait(msg)
@@ -190,21 +199,85 @@ class PayloadHub:
     """If we have a buffered payload, emit it and clear the buffer."""
     if self.current_marker is None:
       return
-    payload = {
-      "type": "connected",
-      "marker": self.current_marker,
-      "lines": self.current_lines,
-    }
+    self._connected = list(self.current_lines)
+    payload = {"type": "connected", "data": self._connected}
     self._reset_buffer()
     self._emit(payload)
 
-  def _set_tx(self, tx: dict[str, Any] | None) -> None:
-    self.current_tx = tx
-    self._emit({"type": "tx", "tx": tx})
+  def _set_tx(self, data: dict[str, Any] | None) -> None:
+    self._emit({"type": "tx", "data": data})
+
+  def _set_rm(self, data: dict[str, Any]) -> None:
+    log.info(data)
+    self._emit({"type": "rm", "data": data})
+
+  def _set_add(self, data: dict[str, Any]) -> None:
+    log.info(data)
+    self._emit({"type": "add", "data": data})
 
   def _reset_buffer(self) -> None:
     self.current_marker = None
     self.current_lines = []
+
+  @staticmethod
+  def _key(d: dict[str, Any]) -> tuple[str, str, str]:
+    return (d["call"], d["ip_address"], d["port"])
+
+  @staticmethod
+  def _isodate(value: str) -> str:
+    tm = datetime.strptime(value, '%Y-%m-%d %H:%M:%S.%f')
+    tm.replace(tzinfo=UTC)
+    return tm.isoformat()
+
+  @staticmethod
+  def parse(m: re.Match[str]) -> dict[str, Any]:
+    data = m.groupdict()
+    data["time"] = PayloadHub._isodate(data["time"])
+    return data
+
+  def _refresh_replay(self) -> None:
+    msg = json.dumps({"type": "connected", "data": self._connected})
+    with self.lock:
+      self._replay["connected"] = msg
+
+  def _apply_rm(self, data: dict[str, Any]) -> None:
+    k = self._key(data)
+    self.current_lines = [e for e in self.current_lines if self._key(e) != k]
+    self._connected = [e for e in self._connected if self._key(e) != k]
+    self._refresh_replay()
+
+  def _apply_add(self, data: dict[str, Any]) -> None:
+    k = self._key(data)
+    if self.current_marker is not None and not any(self._key(e) == k for e in self.current_lines):
+      self.current_lines.append(data)
+    if not any(self._key(e) == k for e in self._connected):
+      self._connected.append(data)
+    self._refresh_replay()
+
+  def _handle_line(self, raw: bytes) -> None:
+    body = line_body(raw)
+    if not body:
+      return
+
+    self.last_line_at = time.monotonic()
+    if m := RE_RM.match(body):
+      data = self.parse(m)
+      self._apply_rm(data)
+      self._set_rm(data)
+    elif m := RE_ADD.match(body):
+      data = self.parse(m)
+      self._apply_add(data)
+      self._set_add(data)
+    elif RE_RX.match(body) or RE_WD.match(body):
+      self._set_tx(None)
+    elif m := RE_TX.match(body):
+      self._set_tx(self.parse(m))
+    elif self.marker.search(body):
+      self._flush_connected()           # previous payload ends here
+      self.current_marker = body
+    elif self.current_marker is not None and len(self.current_lines) < self.max_payload_lines:
+      if m := RE_GW.match(body):
+        self.current_lines.append(self.parse(m))
 
   # ---- lifecycle ----
   def start(self) -> None:
@@ -219,28 +292,6 @@ class PayloadHub:
     self._stop.set()
     if self._thread:
       self._thread.join(timeout=2)
-
-  def _handle_line(self, raw: bytes) -> None:
-    body = line_body(raw)
-    if not body:
-      return
-
-    self.last_line_at = time.monotonic()
-    if RE_RX.match(body) or RE_WD.match(body):
-      self._set_tx(None)
-    elif m := RE_TX.match(body):
-      data = m.groupdict()
-      data['time'] = isodate(data['time'])
-      self._set_tx(data)
-    elif self.marker.search(body):
-      self._flush_connected()           # previous payload ends here
-      self.current_marker = body
-    elif self.current_marker is not None:
-      if len(self.current_lines) < self.max_payload_lines:
-        if m := RE_GW.match(body):
-          data = m.groupdict()
-          data['time'] = isodate(data['time'])
-          self.current_lines.append(data)
 
   def _check_rotation(self, f: BinaryIO) -> BinaryIO | None:
     """
@@ -318,17 +369,16 @@ class PayloadHub:
         f.close()
 
 
-def get_traffic() -> list[dict]:
-  traffic = []
+def get_traffic(limit: int = 10) -> list[dict]:
   name = newest_log(Config.log_path, Config.log_prefix)
-  with open(name, 'rb') as fd:
-    for body in (line_body(r) for r in fd):
-      if m := RE_TX.match(body):
-        data = m.groupdict()
-        data['time'] = isodate(data['time'])
-        traffic.append(data)
-
-  return sorted(traffic, key=operator.itemgetter('time'), reverse=True)[:10]
+  if name is None:
+    return []
+  recent: deque[dict] = deque(maxlen=limit)
+  with open(name, "rb") as fd:
+    for raw in fd:
+      if m := RE_TX.match(line_body(raw)):
+        recent.append(PayloadHub.parse(m))
+  return list(reversed(recent))
 
 
 def create_app() -> Flask:

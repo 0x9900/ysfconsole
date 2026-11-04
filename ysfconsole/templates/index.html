@@ -22,8 +22,8 @@
       <div class="gateway" id="gateway"></div>
       <div class="timer" id="timer"></div>
     </div>
-
-    <div id="connected">
+    <div id="info"></div>
+    <div id="connected" hidden>
       <div class="marker">Linked repeaters/gateways:</div>
       <div id="meta"></div>
       <table id="linked" class="payload-table"></table>
@@ -50,6 +50,9 @@
     const MAX_ACTIVITY = {{ max_activity }};
     const SERVER_ACTIVITY = {{ last_traffic|tojson }};
 
+    let connected = [];
+    let activity = [];
+
     const $ = (id) => document.getElementById(id);
     const connectedEl = $('connected');
     const tableEl     = $('linked');
@@ -60,6 +63,7 @@
     const gatewayEl   = $('gateway');
     const activityEl  = $('activity');
     const recentEl    = $('recent');
+    const infoEl      = $('info');
 
     class Timer {
       constructor(elementId = 'timer', maxDurationMs = 3 * 60 * 1000) {
@@ -136,11 +140,9 @@
       return tr;
     }
 
-    function renderConnected(payload) {
-      const lines = payload.lines.filter(Boolean);
-
+    function renderConnectedTable() {
       // Columns = union of keys, in order of first appearance.
-      const cols = [...new Set(lines.flatMap(Object.keys))];
+      const cols = [...new Set(connected.flatMap(Object.keys))];
 
       const headRow = document.createElement('tr');
       for (const c of cols) {
@@ -152,15 +154,39 @@
       thead.appendChild(headRow);
 
       const tbody = document.createElement('tbody');
-      for (const obj of lines) {
+      for (const obj of connected) {
         tbody.appendChild(makeRow(obj, cols, 'call'));
       }
 
       tableEl.replaceChildren(thead, tbody);
 
       metaEl.textContent =
-        `${lines.length} Reflector(s) connected — Updated: ${new Date().toLocaleTimeString()}`;
+        `${connected.length} Reflector(s) connected — Updated: ${new Date().toLocaleTimeString()}`;
       connectedEl.scrollTop = 0;
+      connectedEl.hidden = false;
+    }
+
+    const sameEntry = (a, b) => a.call === b.call && a.ip_address === b.ip_address && a.port === b.port;
+
+    function addConnected({ data }) {
+      if (!connected.some(item => sameEntry(item, data))) {
+        connected.push(data);
+      }
+      renderConnectedTable();
+      infoEl.textContent = `${data.call} Connected`;
+    }
+
+    function removeConnected({ data }) {
+      connected = connected.filter(item => !sameEntry(item, data));
+      renderConnectedTable();
+      infoEl.textContent = `${data.call} Disconnected`;
+    }
+
+    function renderConnected({ data }) {
+      const lines = data.filter(Boolean);
+      connected = [...lines];
+      renderConnectedTable();
+      infoEl.textContent = "";
     }
 
     function clearTx() {
@@ -169,25 +195,6 @@
       targetEl.textContent = '';
       gatewayEl.textContent = '';
       timer.reset();
-    }
-
-    const activity = [];                      // newest first
-
-    // Populate from server on page load
-    if (SERVER_ACTIVITY && SERVER_ACTIVITY.length) {
-      for (const raw of SERVER_ACTIVITY) {
-        activity.push({
-          Time: raw.time,
-          Call: raw.call,
-          Destination: raw.dest,
-          Gateway: raw.gw,
-        });
-      }
-      activity.length = Math.min(activity.length, MAX_ACTIVITY);
-
-      // Render the seeded activity
-      renderActivityTable();
-      activityEl.hidden = false;
     }
 
     function renderActivityTable() {
@@ -206,37 +213,52 @@
       for (const entry of activity) {
         tbody.appendChild(makeRow(entry, cols, 'Call'));
       }
-
       recentEl.replaceChildren(thead, tbody);
     }
 
+    // Populate from server on page load
+    if (SERVER_ACTIVITY && SERVER_ACTIVITY.length) {
+      for (const raw of SERVER_ACTIVITY) {
+        activity.push({
+          Time: raw.time,
+          Call: raw.call,
+          Destination: raw.dest,
+          Gateway: raw.gw,
+        });
+      }
+      activity.length = Math.min(activity.length, MAX_ACTIVITY);
 
-    function addActivity(tx) {
+      // Render the seeded activity
+      renderActivityTable();
+      activityEl.hidden = false;
+    }
+
+    function addActivity(data) {
       activity.unshift({
-        Time: tx.time,          // keep ISO for sorting
-        Call: tx.call,
-        Destination: tx.dest,
-        Gateway: tx.gw,
+        Time: data.time,          // keep ISO for sorting
+        Call: data.call,
+        Destination: data.dest,
+        Gateway: data.gw,
       });
       activity.length = Math.min(activity.length, MAX_ACTIVITY);
       renderActivityTable();
       activityEl.hidden = false;
     }
 
-    function renderTx({ tx }) {
-      if (tx === null) {
+    function renderTx({ data }) {
+      if (data === null) {
         clearTx();
         return;
       }
       // The server sends a "tx" message for every received-data line;
       // only react when the transmitting station changes.
-      if (tx.call === currentCall) return;
+      if (data.call === currentCall) return;
 
-      currentCall = tx.call;
-      addActivity(tx);
-      callsignEl.textContent = tx.call;
-      targetEl.textContent = tx.dest;
-      gatewayEl.textContent = tx.gw;
+      currentCall = data.call;
+      addActivity(data);
+      callsignEl.textContent = data.call;
+      targetEl.textContent = data.dest;
+      gatewayEl.textContent = data.gw;
       timer.reset();
       timer.start();
     }
@@ -255,9 +277,20 @@
       ws.onmessage = (ev) => {
         if (!ev.data) return;                 // server keep-alive
         let msg;
-        try { msg = JSON.parse(ev.data); } catch { return; }
-        if (msg.type === 'connected') renderConnected(msg);
-        else if (msg.type === 'tx') renderTx(msg);
+        try {
+          msg = JSON.parse(ev.data);
+        } catch {
+          return;
+        }
+        if (msg.type === 'connected') {
+          renderConnected(msg);
+        } else if (msg.type === 'tx') {
+          renderTx(msg);
+        } else if (msg.type === 'rm') {
+          removeConnected(msg);
+        } else if (msg.type === 'add') {
+          addConnected(msg);
+        }
       };
 
       ws.onclose = () => {
