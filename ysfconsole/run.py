@@ -21,9 +21,9 @@ def main():
   Config.load_config()
   parser = argparse.ArgumentParser()
   parser.add_argument("--bind", help="Bind address (HOST:PORT)")
-  args = parser.parse_args()
+  opts = parser.parse_args()
 
-  host, port = parse_bind(args.bind) if args.bind else Config.bind_address, Config.bind_port
+  host, port = parse_bind(opts.bind) if opts.bind else (Config.bind_address, Config.bind_port)
 
   app = create_app()
   app.run(

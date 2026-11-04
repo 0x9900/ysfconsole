@@ -29,7 +29,7 @@ header h1 {
 }
 
 main {
-  margin: 1.2rem;
+  margin: 1rem;
 }
 
 main a {
@@ -185,4 +185,40 @@ footer a:hover {
 .payload-table tr.bad td {
   color: #f7768e;
   font-style: italic;
+}
+
+.time-only {
+  display: none;
+}
+
+@media (max-width: 960px) {
+  header h1 {
+    font-size: 18px;
+  }
+  main {
+    margin: 3px;
+  }
+  .marker {
+    font-size: 18px;
+  }
+  #meta {
+    display: none;
+  }
+  .full-date {
+    display: none;
+  }
+  .time-only {
+    display: inline;
+  }
+  .payload-table td,
+  .payload-table th {
+    padding: 2px 2px;
+  }
+}
+
+@media (max-width: 460px) {
+  .payload-table td:nth-child(4),
+  .payload-table th:nth-child(4) {
+    display: none;
+  }
 }

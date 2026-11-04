@@ -26,7 +26,7 @@ from flask_sock import Sock
 
 from .config import Config
 
-__version__ = "0.1.9"
+__version__ = "0.1.10"
 
 KEEPALIVE_INTERVAL = 30.0
 

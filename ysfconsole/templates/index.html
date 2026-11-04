@@ -130,7 +130,14 @@
         const value = entry[col] ?? '';
 
         if (col.toLowerCase() === 'time' && value) {
-          td.textContent = new Date(value).toLocaleString();
+          const sp1 = document.createElement('span');
+          sp1.classList.add('full-date');
+          sp1.textContent = new Date(value).toLocaleString();
+          const sp2 = document.createElement('span');
+          sp2.classList.add('time-only');
+          sp2.textContent = new Date(value).toLocaleTimeString('en-US', { hour12: false });
+          td.append(sp1);
+          td.append(sp2);
         } else if (col === linkColumn && value) {
           const a = document.createElement('a');
           a.href = `https://qrz.com/db/${value}`;
