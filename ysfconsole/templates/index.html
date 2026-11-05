@@ -28,10 +28,12 @@
       <div class="gateway" id="gateway"></div>
       <div class="timer" id="timer"></div>
     </div>
-    <div id="info"></div>
-    <div id="connected" hidden>
-      <div class="marker">Linked repeaters/gateways:</div>
-      <div id="meta"></div>
+    <div id="connected">
+      <div class="link-head">
+        <div class="marker">Linked repeaters/gateways:</div>
+        <div id="info"></div>
+        <div id="meta"></div>
+      </div>
       <table id="linked" class="payload-table"></table>
     </div>
 
@@ -42,9 +44,8 @@
   </main>
 
   <footer>
-    ysfconsole ({{ version }}) &copy; 2026 <a href="https://www.qrz.com/db/W6BSD/" target="bsd">W6BSD</a><br>
-    Visit <a href="https://bsdworld.org/" target="bsd">bsdworld.org</a> for more solar
-    activty information. <br>
+    ysfconsole ({{ version }}) &copy; 2026 Fred <a href="https://www.qrz.com/db/W6BSD/" target="bsd">W6BSD</a><br>
+    Visit <a href="https://bsdworld.org/" target="bsd">bsdworld.org</a> for solar and propagation information.<br>
     HamRadio <a href="https://tools.bsdworld.org/" target="bsd">Tools</a>
     &mdash; Maidenhead Grid Square <a href="https://tools.bsdworld.org/QRA-Locator/" target="bsd">QRA-Locator</a>
   </footer>
@@ -69,7 +70,6 @@
     const gatewayEl   = $('gateway');
     const activityEl  = $('activity');
     const recentEl    = $('recent');
-    const infoEl      = $('info');
 
     class Timer {
       constructor(elementId = 'timer', maxDurationMs = 3 * 60 * 1000) {
@@ -118,6 +118,16 @@
       }
     }
 
+    function showInfo(msg) {
+      const infoElement = $('info');
+      infoElement.textContent = msg;
+      infoElement.classList.remove('faded');
+      clearTimeout(infoElement._hideTimer);
+      infoElement._hideTimer = setTimeout(() => {
+        infoElement.classList.add('faded');
+      }, 10000);
+    }
+
     const timer = new Timer();
     let currentCall = '';
     let ws = null;
@@ -125,22 +135,31 @@
 
     function makeRow(entry, cols, linkColumn) {
       const tr = document.createElement('tr');
+
       for (const col of cols) {
         const td = document.createElement('td');
         const value = entry[col] ?? '';
 
         if (col.toLowerCase() === 'time' && value) {
-          const sp1 = document.createElement('span');
-          sp1.classList.add('full-date');
-          sp1.textContent = new Date(value).toLocaleString();
-          const sp2 = document.createElement('span');
-          sp2.classList.add('time-only');
-          sp2.textContent = new Date(value).toLocaleTimeString('en-US', { hour12: false });
-          td.append(sp1);
-          td.append(sp2);
+          const date = new Date(value);
+          if (Number.isNaN(date.getTime())) {
+            // Don't render "Invalid Date" — fall back to the raw value
+            td.textContent = value;
+          } else {
+            const full = document.createElement('span');
+            full.className = 'full-date';
+            full.textContent = date.toLocaleString();
+
+            const time = document.createElement('span');
+            time.className = 'time-only';
+            time.textContent = date.toLocaleTimeString('en-US', { hour12: false });
+
+            td.append(full, time);
+          }
         } else if (col === linkColumn && value) {
           const a = document.createElement('a');
-          a.href = `https://qrz.com/db/${value}`;
+          // encodeURIComponent so values with slashes, spaces, etc. don't break the URL
+          a.href = `https://qrz.com/db/${encodeURIComponent(value)}`;
           a.textContent = value;
           a.target = '_blank';
           a.rel = 'noopener noreferrer';
@@ -148,8 +167,10 @@
         } else {
           td.textContent = value;
         }
+
         tr.appendChild(td);
       }
+
       return tr;
     }
 
@@ -186,28 +207,20 @@
         connected.push(data);
       }
       renderConnectedTable();
-      infoEl.textContent = `${data.call} Connected`;
+      showInfo(`${data.call} Connected`);
     }
 
     function removeConnected({ data }) {
+      const reason = (data.reason || 'Disconnected').replace(/^./, c => c.toUpperCase());
       connected = connected.filter(item => !sameEntry(item, data));
       renderConnectedTable();
-      infoEl.textContent = `${data.call} Disconnected`;
+      showInfo(`${data.call} ${reason}`);
     }
 
     function renderConnected({ data }) {
       const lines = data.filter(Boolean);
       connected = [...lines];
       renderConnectedTable();
-      infoEl.textContent = "";
-    }
-
-    function clearTx() {
-      currentCall = '';
-      callsignEl.textContent = '';
-      targetEl.textContent = '';
-      gatewayEl.textContent = '';
-      timer.reset();
     }
 
     function renderActivityTable() {
@@ -247,8 +260,12 @@
     }
 
     function addActivity(data) {
+      const call = data.call.toUpperCase();
+      const idx = activity.findIndex(a => a.Call.toUpperCase() === call);
+      if (idx !== -1) activity.splice(idx, 1);
+
       activity.unshift({
-        Time: data.time,          // keep ISO for sorting
+        Time: data.time,
         Call: data.call,
         Destination: data.dest,
         Gateway: data.gw,
@@ -274,6 +291,14 @@
       gatewayEl.textContent = data.gw;
       timer.reset();
       timer.start();
+    }
+
+    function clearTx() {
+      currentCall = '';
+      callsignEl.textContent = '';
+      targetEl.textContent = '';
+      gatewayEl.textContent = '';
+      timer.reset();
     }
 
     function setStatus(on) {
@@ -308,7 +333,7 @@
 
       ws.onclose = () => {
         setStatus(false);
-        clearTx();                            // don't show a stale transmission
+        clearTx();
         ws = null;
         clearTimeout(reconnectTimer);
         reconnectTimer = setTimeout(connect, RECONNECT_MS);

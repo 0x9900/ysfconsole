@@ -14,6 +14,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
+logging.basicConfig()
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
@@ -47,6 +48,7 @@ class Config:
 
     with open(config_file, "rb") as fd:
       _config_data = tomllib.load(fd)
+    log.info('Config file: %s', config_file)
 
     if not _config_data:
       raise SystemError('Configuration error')

@@ -16,7 +16,6 @@ import queue
 import re
 import threading
 import time
-from collections import deque
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -26,7 +25,7 @@ from flask_sock import Sock
 
 from .config import Config
 
-__version__ = "0.1.10"
+__version__ = "0.1.11"
 
 KEEPALIVE_INTERVAL = 30.0
 
@@ -41,7 +40,7 @@ RE_RM = re.compile(
   r'^\w:\s+(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)'
   r'\s*Removing\s(?P<call>\w+)\s*'
   r'\((?P<ip_address>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d{1,5})\)'
-  r'\s*unlinked$'
+  r'\s*(?P<reason>unlinked|disappeared)$'
 )
 
 RE_ADD = re.compile(
@@ -373,12 +372,15 @@ def get_traffic(limit: int = 10) -> list[dict]:
   name = newest_log(Config.log_path, Config.log_prefix)
   if name is None:
     return []
-  recent: deque[dict] = deque(maxlen=limit)
+  latest: dict[str, dict] = {}
   with open(name, "rb") as fd:
     for raw in fd:
       if m := RE_TX.match(line_body(raw)):
-        recent.append(PayloadHub.parse(m))
-  return list(reversed(recent))
+        data = PayloadHub.parse(m)
+        old = latest.get(data["call"])
+        if old is None or data["time"] >= old["time"]:
+          latest[data["call"]] = data
+  return sorted(latest.values(), key=lambda d: d["time"], reverse=True)[:limit]
 
 
 def create_app() -> Flask:
