@@ -49,3 +49,9 @@ Issues   = "https://github.com/0x9900/ysfconsole/issues"
 
 [tool.setuptools.packages.find]
 include = ["ysfconsole*"]
+
+[tool.mypy]
+disable_error_code = [
+  "import-untyped",
+  "annotation-unchecked",
+]

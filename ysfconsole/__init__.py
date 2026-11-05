@@ -144,8 +144,9 @@ class PayloadHub:
                pattern: str,
                poll_interval: float,
                idle_flush: float,
-               marker: re.Pattern[str],
+               marker: re.Pattern[str] | None,
                max_payload_lines: int) -> None:
+    assert marker is not None
     self.log_dir = Path(log_dir)
     self.pattern = pattern        # e.g. "ysfreflector*.log"
     self.poll_interval = poll_interval

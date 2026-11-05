@@ -35,7 +35,7 @@ class Config:
   log_marker: re.Pattern | None = None
 
   @classmethod
-  def load_config(cls, conf_file: str = None) -> None:
+  def load_config(cls, conf_file: str | None = None) -> None:
     """Load configuration from TOML file and override attributes."""
     env_config = conf_file if conf_file else os.environ.get("CONFIG_FILE", 'ysfconsole-dev.toml')
 
@@ -59,10 +59,8 @@ class Config:
         continue
 
       if key == 'log_marker':
-        _value = re.compile(value)
+        setattr(cls, key, re.compile(value))
       elif key == 'log_path':
-        _value = Path(value)
+        setattr(cls, key, Path(value))
       else:
-        _value = value
-
-      setattr(cls, key, _value)
+        setattr(cls, key, value)

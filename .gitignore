@@ -151,3 +151,5 @@ dmypy.json
 # Misc
 nohup.out
 .DS_Store
+logs/
+genlog.py
