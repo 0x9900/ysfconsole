@@ -25,34 +25,35 @@ from flask_sock import Sock
 
 from .config import Config
 
-__version__ = "0.1.11"
+__version__ = "0.1.12"
 
 KEEPALIVE_INTERVAL = 30.0
 
 RE_GW = re.compile(
   r'^\w:\s+(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)'
-  r'\s*(?P<call>\w+)'
+  r'\s*(?P<call>\w+(|-\w+))'
   r'\s*:\s*'
   r'(?P<ip_address>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d{1,5})\s+(\d+/\d+)$'
 )
 
 RE_RM = re.compile(
   r'^\w:\s+(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)'
-  r'\s*Removing\s(?P<call>\w+)\s*'
+  r'\s*Removing\s(?P<call>\w+(|-\w+))\s*'
   r'\((?P<ip_address>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d{1,5})\)'
   r'\s*(?P<reason>unlinked|disappeared)$'
 )
 
 RE_ADD = re.compile(
   r'^\w:\s+(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)'
-  r'\s*Adding\s(?P<call>\w+)\s*'
+  r'\s*Adding\s(?P<call>\w+(|-\w+))\s*'
   r'\((?P<ip_address>\d{1,3}(?:\.\d{1,3}){3}):(?P<port>\d{1,5})\)'
 )
 
 RE_TX = re.compile(
   r'^\w:\s+(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)'
-  r'\s*Received data from (?P<call>\w+)\s+to\s(?P<dest>\w+)\s+at\s(?P<gw>\w+)'
+  r'\s*Received data from (?P<call>\w+(|-\w+))\s+to\s(?P<dest>\w+)\s+at\s(?P<gw>\w+)'
 )
+
 RE_RX = re.compile(
   r'^\w:\s+(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)'
   r'\s*Received (?P<end>end) of transmission'
@@ -207,11 +208,9 @@ class PayloadHub:
     self._emit({"type": "tx", "data": data})
 
   def _set_rm(self, data: dict[str, Any]) -> None:
-    log.info(data)
     self._emit({"type": "rm", "data": data})
 
   def _set_add(self, data: dict[str, Any]) -> None:
-    log.info(data)
     self._emit({"type": "add", "data": data})
 
   def _reset_buffer(self) -> None:

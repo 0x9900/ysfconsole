@@ -116,7 +116,7 @@ footer a:hover {
 
 .tx {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(2, 1fr);
   align-items: stretch;
   width: 100%;
   box-sizing: border-box;
@@ -128,8 +128,6 @@ footer a:hover {
 }
 
 .callsign,
-.destination,
-.gateway,
 .timer {
   display: flex;
   flex-direction: column;

@@ -24,8 +24,6 @@
   <main>
     <div class="tx">
       <div class="callsign" id="callsign"></div>
-      <div class="destination" id="target"></div>
-      <div class="gateway" id="gateway"></div>
       <div class="timer" id="timer"></div>
     </div>
     <div id="connected">
@@ -66,8 +64,6 @@
     const statusEl    = $('status');
     const metaEl      = $('meta');
     const callsignEl  = $('callsign');
-    const targetEl    = $('target');
-    const gatewayEl   = $('gateway');
     const activityEl  = $('activity');
     const recentEl    = $('recent');
 
@@ -287,8 +283,6 @@
       currentCall = data.call;
       addActivity(data);
       callsignEl.textContent = data.call;
-      targetEl.textContent = data.dest;
-      gatewayEl.textContent = data.gw;
       timer.reset();
       timer.start();
     }
@@ -296,8 +290,6 @@
     function clearTx() {
       currentCall = '';
       callsignEl.textContent = '';
-      targetEl.textContent = '';
-      gatewayEl.textContent = '';
       timer.reset();
     }
 
