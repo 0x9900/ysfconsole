@@ -181,6 +181,7 @@ class PayloadHub:
       self.clients.discard(client_queue)
 
   def _emit(self, payload: dict[str, Any]) -> None:
+    payload['timestamp'] = datetime.now(UTC).isoformat()
     log.debug("emit %r", payload)
     msg = json.dumps(payload)
     with self.lock:

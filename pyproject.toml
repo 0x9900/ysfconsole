@@ -55,3 +55,6 @@ disable_error_code = [
   "import-untyped",
   "annotation-unchecked",
 ]
+
+[tool.ty.environment]
+python-version = "3.14"

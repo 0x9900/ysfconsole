@@ -59,13 +59,7 @@
     let activity = [];
 
     const $ = (id) => document.getElementById(id);
-    const connectedEl = $('connected');
-    const tableEl     = $('linked');
-    const statusEl    = $('status');
-    const metaEl      = $('meta');
     const callsignEl  = $('callsign');
-    const activityEl  = $('activity');
-    const recentEl    = $('recent');
 
     class Timer {
       constructor(elementId = 'timer', maxDurationMs = 3 * 60 * 1000) {
@@ -188,12 +182,8 @@
         tbody.appendChild(makeRow(obj, cols, 'call'));
       }
 
-      tableEl.replaceChildren(thead, tbody);
+      $('linked').replaceChildren(thead, tbody);
 
-      metaEl.textContent =
-        `${connected.length} Reflector(s) connected — Updated: ${new Date().toLocaleTimeString()}`;
-      connectedEl.scrollTop = 0;
-      connectedEl.hidden = false;
     }
 
     const sameEntry = (a, b) => a.call === b.call && a.ip_address === b.ip_address && a.port === b.port;
@@ -235,7 +225,7 @@
       for (const entry of activity) {
         tbody.appendChild(makeRow(entry, cols, 'Call'));
       }
-      recentEl.replaceChildren(thead, tbody);
+      $('recent').replaceChildren(thead, tbody);
     }
 
     // Populate from server on page load
@@ -252,7 +242,7 @@
 
       // Render the seeded activity
       renderActivityTable();
-      activityEl.hidden = false;
+      $('activity').hidden = false;
     }
 
     function addActivity(data) {
@@ -268,7 +258,7 @@
       });
       activity.length = Math.min(activity.length, MAX_ACTIVITY);
       renderActivityTable();
-      activityEl.hidden = false;
+      $('activity').hidden = false;
     }
 
     function renderTx({ data }) {
@@ -294,8 +284,17 @@
     }
 
     function setStatus(on) {
+      const statusEl = $('status');
       statusEl.textContent = on ? 'connected' : 'disconnected';
       statusEl.className = on ? 'on' : 'off';
+    }
+
+    function metaUpdate(payload) {
+      if (!payload.timestamp)
+        return;
+      const update_time = new Date(payload.timestamp).toLocaleTimeString();
+      const cnx = connected.length;
+      $('meta').textContent = `${cnx} Reflector(s) connected — Updated: ${update_time}`;
     }
 
     function connect() {
@@ -321,6 +320,7 @@
         } else if (msg.type === 'add') {
           addConnected(msg);
         }
+        metaUpdate(msg);
       };
 
       ws.onclose = () => {
