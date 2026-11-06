@@ -226,8 +226,7 @@ class PayloadHub:
   @staticmethod
   def _isodate(value: str) -> str:
     tm = datetime.strptime(value, '%Y-%m-%d %H:%M:%S.%f')
-    tm.replace(tzinfo=UTC)
-    return tm.isoformat()
+    return tm.replace(tzinfo=UTC).isoformat().replace('+00:00', 'Z')
 
   @staticmethod
   def parse(m: re.Match[str]) -> dict[str, Any]:
