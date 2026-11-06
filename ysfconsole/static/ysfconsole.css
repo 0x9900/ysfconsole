@@ -9,7 +9,7 @@ body {
   font-family: system-ui, sans-serif;
   margin: 0;
   background: #101;
-  color: #eee;
+  color: #bbb;
 }
 
 header {
@@ -149,15 +149,9 @@ footer a:hover {
   letter-spacing: 0.3em;
 }
 
-.destination,
-.gateway {
-  font-size: 18px;
-  font-weight: 400;
-}
-
 .marker {
   font-size: 28px;
-  color: #999;
+  color: #aaa;
   font-weight: 600;
 }
 
@@ -200,37 +194,46 @@ footer a:hover {
 }
 
 .payload-table tbody tr:hover {
-  background: #1a1a1a;
-}
-
-.payload-table tr.bad td {
-  color: #f7768e;
-  font-style: italic;
+  background: #111;
 }
 
 .time-only {
   display: none;
 }
 
+.oneword {
+  word-break: keep-all;
+}
+
+.hide {
+  color: #77b;
+}
+
 @media (max-width: 960px) {
   header h1 {
     font-size: 18px;
   }
+
   main {
     margin: 3px;
   }
+
   .marker {
     font-size: 18px;
   }
+
   #meta {
     display: none;
   }
+
   .full-date {
     display: none;
   }
+
   .time-only {
     display: inline;
   }
+
   .payload-table td,
   .payload-table th {
     padding: 2px 2px;
@@ -242,6 +245,7 @@ footer a:hover {
   .payload-table th:nth-child(4) {
     display: none;
   }
+
   .link-head {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -255,5 +259,8 @@ footer a:hover {
     opacity: 0.5;
     pointer-events: none;
     text-align: right;
+  }
+  .hide {
+    display: none;
   }
 }
