@@ -7,7 +7,7 @@ name = "ysfconsole"
 dynamic = ["version"]
 description = "Monitor the connections on a YSF reflector"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.14"
 license = "BSD-3-Clause"
 authors = [
   { name = "Fred C" },
@@ -17,7 +17,7 @@ classifiers = [
   "Development Status :: 4 - Beta",
   "Framework :: Flask",
   "Intended Audience :: Developers",
-  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.14",
   "Topic :: System :: Logging",
 ]
 
@@ -49,6 +49,13 @@ Issues   = "https://github.com/0x9900/ysfconsole/issues"
 
 [tool.setuptools.packages.find]
 include = ["ysfconsole*"]
+
+[tool.setuptools.package-data]
+ysfconsole = [
+  "templates/*",
+  "static/*",
+  "static/**/*",
+]
 
 [tool.mypy]
 disable_error_code = [
