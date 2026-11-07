@@ -131,22 +131,29 @@ footer a:hover {
 .timer {
   display: flex;
   flex-direction: column;
-  justify-content: center;   /* vertical centering of content */
-  align-items: center;       /* horizontal centering */
+  justify-content: center;
+  align-items: center;
   height: 100%;
 }
 
 .timer {
   font-family: "Kode Mono", monospace;
-  font-weight: 200;
+  font-weight: 400;
+  font-style: normal;
+  font-variation-settings: "wdth" 125, "ROND" 0;
+  font-optical-sizing: auto;
   color: rgb(51, 240, 50);
   letter-spacing: 0.4em;
   text-shadow: 0 0 2px #080, 0 0 4px #0a0, 0 0 6px #0c0;
 }
 
 .callsign {
+  font-family: "Orbitron", sans-serif;
+  font-optical-sizing: auto;
+  font-weight: 600;
+  font-style: normal;
   color: #f80;
-  letter-spacing: 0.3em;
+  letter-spacing: 0.2em;
 }
 
 .marker {
