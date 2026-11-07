@@ -25,7 +25,7 @@ from flask_sock import Sock
 
 from .config import Config
 
-__version__ = "0.1.16"
+__version__ = "0.1.17"
 
 KEEPALIVE_INTERVAL = 30.0
 
@@ -125,6 +125,8 @@ def open_and_seek(name: str, marker: re.Pattern[str], from_start: bool = False) 
 
 # --- Broadcast hub -----------------------------------------------------------
 class PayloadHub:
+  # pylint: disable=too-many-instance-attributes, too-many-arguments
+  # pylint: disable=too-many-positional-arguments, too-many-instance-attributes
   """
   Watches a log file and emits discrete payloads.
 
@@ -139,7 +141,8 @@ class PayloadHub:
   New clients are sent the latest message of each type on registration.
   """
 
-  # pylint: disable=too-many-instance-attributes, too-many-arguments, too-many-positional-arguments
+  MAX_LINE = 64 * 1024
+
   def __init__(self, log_dir: str | Path,
                pattern: str,
                poll_interval: float,
@@ -323,8 +326,10 @@ class PayloadHub:
       self._flush_connected()
 
   def _tail_loop(self) -> None:
+    # pylint: disable=too-many-nested-blocks, too-many-branches
     f: BinaryIO | None = None
     pending = b""
+    discarding = False
     try:
       while not self._stop.is_set():
         try:
@@ -335,21 +340,30 @@ class PayloadHub:
               self._stop.wait(self.poll_interval)
               continue
             f = open_and_seek(name, self.marker)
-            pending = b""
+            pending, discarding = b"", False
 
-          raw = f.readline()
+          raw = f.readline(self.MAX_LINE - len(pending) + 1)
           if raw:
+            complete = raw.endswith(b"\n")
+            if discarding:
+              if complete:
+                discarding = False
+              continue
             pending += raw
-            if pending.endswith(b"\n"):        # only handle complete lines
+            if complete:
               self._handle_line(pending)
               pending = b""
+            elif len(pending) > self.MAX_LINE:
+              log.warning('line exceeds %d bytes; discarding until newline',
+                          self.MAX_LINE)
+              pending, discarding = b"", True
             continue
 
           # ---- EOF: rotation / truncation / idle flush ----
           new_f = self._check_rotation(f)
           if new_f is not f:
             f = new_f
-            pending = b""
+            pending, discarding = b"", False
             continue
 
           self._maybe_idle_flush()
@@ -360,7 +374,7 @@ class PayloadHub:
           if f is not None:
             f.close()
             f = None
-          pending = b""
+          pending, discarding = b"", False
           self._reset_buffer()
           self._stop.wait(self.poll_interval)
     finally:
