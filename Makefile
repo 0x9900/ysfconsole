@@ -18,7 +18,7 @@ help:
 	@echo "make mypy"
 	@echo "make build"
 
-all: pre-commit pylint
+all: pre-commit pylint mypy
 
 # Clean: Remove build artifacts and cache
 clean:
@@ -30,10 +30,10 @@ pre-commit:
 
 # Pylint: Run code linting
 pylint:
-	-pylint ysfconsole
+	pylint ysfconsole
 
 mypy:
-	-mypy ysfconsole
+	mypy ysfconsole
 
 # Build: Build the Python package
 build: clean all
