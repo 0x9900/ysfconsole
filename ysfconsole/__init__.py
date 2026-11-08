@@ -448,13 +448,3 @@ def create_app() -> Flask:
       hub.unregister(q)
 
   return app
-
-
-def run() -> None:
-  logging.basicConfig()
-  Config.load_config()
-  create_app().run(host=Config.bind_address, port=Config.bind_port, debug=False)
-
-
-if __name__ == "__main__":
-  run()
