@@ -63,7 +63,7 @@
     const callsignEl  = $('callsign');
 
     class Timer {
-      constructor(elementId = 'timer', maxDurationMs = 3 * 60 * 1000) {
+      constructor(elementId = 'timer', maxDurationMs = 1 * 60 * 1000) {
         this.element = $(elementId);
         this.intervalId = null;
         this.startTime = 0;
@@ -86,9 +86,11 @@
       }
 
       tick() {
-        this.elapsed = Math.min(Date.now() - this.startTime, this.maxDurationMs);
+        this.elapsed = Date.now() - this.startTime;
         this.render();
-        if (this.elapsed >= this.maxDurationMs) this.stop();
+        if (this.elapsed >= this.maxDurationMs) {
+          this.element.classList.add('overtime');
+        }
       }
 
       stop() {
@@ -102,6 +104,8 @@
         this.stop();
         this.elapsed = 0;
         this.element.textContent = '';
+        this.element.classList.remove('overtime');
+
       }
 
       render() {

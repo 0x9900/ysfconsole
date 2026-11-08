@@ -25,7 +25,7 @@ from flask_sock import Sock
 
 from .config import Config
 
-__version__ = "0.1.18"
+__version__ = "0.1.19"
 
 KEEPALIVE_INTERVAL = 30.0
 
@@ -51,7 +51,7 @@ RE_ADD = re.compile(
 
 RE_TX = re.compile(
   r'^\w:\s+(?P<time>\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2}\.\d+)'
-  r'\s*Received data from (?P<call>\w+(|-\w+))\s+to\s(?P<dest>\w+)\s+at\s(?P<gw>\w+)'
+  r'\s*Received data from\s(?P<call>\S+)\s+to\s(?P<dest>\S+)\s+at\s(?P<gw>\S+)'
 )
 
 RE_RX = re.compile(

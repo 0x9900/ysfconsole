@@ -147,6 +147,10 @@ footer a:hover {
   text-shadow: 0 0 2px #080, 0 0 4px #0a0, 0 0 6px #0c0;
 }
 
+.overtime {
+  color: #f55;
+}
+
 .callsign {
   font-family: "Orbitron", sans-serif;
   font-optical-sizing: auto;
