@@ -1,6 +1,6 @@
 # YSF Reflector Console/Dashboard
 
-A web-based console / dashboard for monitoring a YSF (Yaesu System Fusion) Reflector.
+A web-based [console / dashboard][1] for monitoring a YSF (Yaesu System Fusion) Reflector.
 
 ## Overview
 
@@ -36,3 +36,5 @@ install and enable `ysfconsole.service`, and finally configure your http server 
 ## License
 
 See the repository for license details.
+
+[1]: https://ysfconsole.bsdworld.org/
